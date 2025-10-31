@@ -32,7 +32,7 @@ export async function searchWithOpenAI(
   try {
     // Use the Responses API with web search
     const response = await (client as any).responses.create({
-      model: "gpt-5",
+      model: "gpt-4o",
       tools: [
         {
           type: "web_search_preview",
