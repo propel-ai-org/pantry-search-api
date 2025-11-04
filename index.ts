@@ -3,6 +3,8 @@
 
 import { initDatabase } from "./database";
 import { searchFoodResources } from "./search";
+import { searchFoodResourcesByCounty } from "./county-search";
+import { findCounty } from "./counties";
 
 const db = initDatabase();
 
@@ -48,6 +50,58 @@ const server = Bun.serve({
         return new Response(
           JSON.stringify({
             error: "Failed to search for food resources",
+            details: error instanceof Error ? error.message : String(error),
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
+    if (url.pathname === "/search-county" && req.method === "GET") {
+      const countyName = url.searchParams.get("county");
+      const state = url.searchParams.get("state");
+
+      if (!countyName || !state) {
+        return new Response(
+          JSON.stringify({
+            error: "county and state parameters are required",
+          }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      try {
+        const county = await findCounty(countyName, state);
+
+        if (!county) {
+          return new Response(
+            JSON.stringify({
+              error: `County not found: ${countyName}, ${state}`,
+            }),
+            {
+              status: 404,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        const results = await searchFoodResourcesByCounty(db, county);
+
+        return new Response(JSON.stringify(results), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (error) {
+        console.error("County search error:", error);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to search for food resources by county",
             details: error instanceof Error ? error.message : String(error),
           }),
           {

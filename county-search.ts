@@ -1,11 +1,12 @@
-// ABOUTME: Search functionality for finding and verifying food resources
-// ABOUTME: Handles web search, result parsing, caching, and verification logic
+// ABOUTME: County-based search functionality for food resources
+// ABOUTME: Handles searching by county name/state with caching
 
 import type { Database } from "bun:sqlite";
-import type { FoodResource } from "./database";
+import type { FoodResource, CountySearch } from "./database";
 import { searchWithOpenAI } from "./openai-search";
 import { filterBySource } from "./source-filter";
 import { enrichWithGooglePlaces } from "./google-places";
+import type { County } from "./counties";
 
 interface SearchResult {
   pantries: FoodResource[];
@@ -17,20 +18,21 @@ interface SearchResult {
 
 const CACHE_EXPIRY_DAYS = 30;
 
-export async function searchFoodResources(
+export async function searchFoodResourcesByCounty(
   db: Database,
-  zipCode: string
+  county: County
 ): Promise<SearchResult> {
   // Check for cached results first
-  const cachedResults = getCachedResults(db, zipCode);
+  const cachedResults = getCachedCountyResults(db, county.geoid);
   if (cachedResults) {
     return cachedResults;
   }
 
   // Perform fresh search using OpenAI web search
-  console.log(`Performing fresh search for zip code: ${zipCode}`);
+  console.log(`Performing fresh search for ${county.name}, ${county.state}`);
 
-  const searchResults = await searchWithOpenAI(zipCode, "zip");
+  const searchQuery = `${county.name}, ${county.state}`;
+  const searchResults = await searchWithOpenAI(searchQuery, "county");
 
   // Deduplicate results
   const uniqueResults = deduplicateResults(searchResults);
@@ -55,32 +57,32 @@ export async function searchFoodResources(
   );
 
   // Store results in database
-  const storedResults = storeResults(db, enrichedResults, zipCode);
+  const storedResults = storeCountyResults(db, enrichedResults, county);
 
   // Record search
-  recordSearch(db, zipCode, storedResults.length);
+  recordCountySearch(db, county, storedResults.length);
 
   return categorizeResults(storedResults, false);
 }
 
-function getCachedResults(
+function getCachedCountyResults(
   db: Database,
-  zipCode: string
+  countyGeoid: string
 ): SearchResult | null {
   const expiryDate = new Date();
   expiryDate.setDate(expiryDate.getDate() - CACHE_EXPIRY_DAYS);
   const expiryTimestamp = expiryDate.toISOString();
 
-  // Check if we have a recent search for this zip
+  // Check if we have a recent search for this county
   const recentSearch = db
-    .query<ZipSearch, string>(
-      `SELECT * FROM zip_searches
-       WHERE zip_code = ?
+    .query<CountySearch, string>(
+      `SELECT * FROM county_searches
+       WHERE county_geoid = ?
        AND searched_at > ?
        ORDER BY searched_at DESC
        LIMIT 1`
     )
-    .get(zipCode, expiryTimestamp);
+    .get(countyGeoid, expiryTimestamp);
 
   if (!recentSearch) {
     return null;
@@ -90,16 +92,16 @@ function getCachedResults(
   const resources = db
     .query<FoodResource, string>(
       `SELECT * FROM resources
-       WHERE zip_code = ?
+       WHERE county_geoid = ?
        ORDER BY name`
     )
-    .all(zipCode);
+    .all(countyGeoid);
 
   if (resources.length === 0) {
     return null;
   }
 
-  console.log(`Using cached results for zip code: ${zipCode}`);
+  console.log(`Using cached results for county: ${countyGeoid}`);
   return categorizeResults(resources, true);
 }
 
@@ -118,20 +120,20 @@ function deduplicateResults(
   return Array.from(seen.values());
 }
 
-function storeResults(
+function storeCountyResults(
   db: Database,
   results: Partial<FoodResource>[],
-  zipCode: string
+  county: County
 ): FoodResource[] {
   const stored: FoodResource[] = [];
 
   const insertStmt = db.prepare(`
     INSERT INTO resources (
-      name, address, city, state, zip_code, latitude, longitude,
-      type, phone, hours, rating, wait_time_minutes, eligibility_requirements,
-      services_offered, languages_spoken, accessibility_notes, notes,
-      is_verified, verification_notes, source_url, location_type
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      name, address, city, state, zip_code, county_name, county_geoid, location_type,
+      latitude, longitude, type, phone, hours, rating, wait_time_minutes,
+      eligibility_requirements, services_offered, languages_spoken, accessibility_notes,
+      notes, is_verified, verification_notes, source_url
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const result of results) {
@@ -139,8 +141,11 @@ function storeResults(
       result.name || "",
       result.address || "",
       result.city || null,
-      result.state || null,
-      zipCode,
+      result.state || county.state,
+      result.zip_code || null,
+      county.name,
+      county.geoid,
+      "county",
       result.latitude || null,
       result.longitude || null,
       result.type || "mixed",
@@ -155,21 +160,27 @@ function storeResults(
       result.notes || null,
       result.is_verified ? 1 : 0,
       result.verification_notes || null,
-      result.source_url || null,
-      "zip"
+      result.source_url || null
     );
 
-    const id = db.query("SELECT last_insert_rowid() as id").get() as { id: number };
+    const id = db.query("SELECT last_insert_rowid() as id").get() as {
+      id: number;
+    };
     stored.push({ ...result, id: id.id } as FoodResource);
   }
 
   return stored;
 }
 
-function recordSearch(db: Database, zipCode: string, resultCount: number): void {
+function recordCountySearch(
+  db: Database,
+  county: County,
+  resultCount: number
+): void {
   db.run(
-    `INSERT INTO zip_searches (zip_code, result_count) VALUES (?, ?)`,
-    [zipCode, resultCount]
+    `INSERT INTO county_searches (county_geoid, county_name, state, result_count)
+     VALUES (?, ?, ?, ?)`,
+    [county.geoid, county.name, county.state, resultCount]
   );
 }
 
@@ -184,11 +195,4 @@ function categorizeResults(
     cached,
     search_timestamp: new Date().toISOString(),
   };
-}
-
-interface ZipSearch {
-  id: number;
-  zip_code: string;
-  searched_at: string;
-  result_count: number;
 }

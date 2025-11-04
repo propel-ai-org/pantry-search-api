@@ -19,6 +19,12 @@ interface OpenAISearchResult {
     type: "pantry" | "bank" | "mixed";
     phone?: string;
     hours?: string;
+    rating?: number;
+    wait_time_minutes?: number;
+    eligibility_requirements?: string;
+    services_offered?: string;
+    languages_spoken?: string;
+    accessibility_notes?: string;
     notes?: string;
     is_verified: boolean;
     verification_notes?: string;
@@ -27,38 +33,53 @@ interface OpenAISearchResult {
 }
 
 export async function searchWithOpenAI(
-  zipCode: string
+  location: string,
+  locationType: "zip" | "county" = "zip"
 ): Promise<Partial<FoodResource>[]> {
   try {
+    const locationPhrase = locationType === "zip"
+      ? `near zip code ${location}`
+      : `in ${location}`;
+
     // Use the Responses API with web search
     const response = await (client as any).responses.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       tools: [
         {
           type: "web_search_preview",
         },
       ],
-      input: `Search for food pantries and food banks near zip code ${zipCode}.
+      input: `Search for food pantries and food banks ${locationPhrase}.
 
 I need you to:
 1. Find up to 10 food resources (pantries, food banks, or facilities that provide both)
 2. For each resource, verify it is currently operating (not permanently closed)
-3. Check for any information about wait times or service quality from reviews
-4. Categorize each as "pantry", "bank", or "mixed" based on the services offered
+3. Extract ONLY factual, verifiable information - do NOT make up or estimate any data
 
-For each verified resource, provide:
-- name: The official name
-- address: Street address
+For each verified resource, provide these fields ONLY if you have concrete evidence:
+- name: The official name (REQUIRED)
+- address: Street address (REQUIRED)
 - city: City name
 - state: State abbreviation
-- latitude & longitude: Coordinates if available
-- type: "pantry" (emergency food distribution), "bank" (large-scale food distribution hub), or "mixed"
-- phone: Contact phone number
-- hours: Operating hours if available
-- notes: Any additional info like wait times, services offered, eligibility requirements, ratings
-- is_verified: true only if you can confirm it's currently operating
-- verification_notes: How you verified it's open (recent reviews, official website, etc.)
-- source_url: Primary source URL where you found this information
+- latitude & longitude: Coordinates (only if found in source)
+- type: "pantry" (emergency food distribution), "bank" (large-scale food distribution hub), or "mixed" (REQUIRED)
+- phone: Contact phone number (only if found)
+- hours: Operating hours (only if found, use exact format from source)
+- rating: Numeric rating out of 5 (only if you find an actual rating from Google, Yelp, etc. - do NOT estimate)
+- wait_time_minutes: Average wait time in minutes (only if explicitly stated somewhere - do NOT estimate)
+- eligibility_requirements: Who can receive services (e.g., "Must show ID and proof of residence", "Open to all")
+- services_offered: What they provide beyond food (e.g., "SNAP assistance, diapers, hygiene products")
+- languages_spoken: Languages available (e.g., "English, Spanish")
+- accessibility_notes: Wheelchair access, parking, etc. (only if mentioned)
+- notes: Any other relevant information (keep brief, factual only)
+- is_verified: true only if you can confirm it's currently operating (REQUIRED)
+- verification_notes: How you verified it's open (REQUIRED - e.g., "Official website updated Jan 2025", "Recent Google reviews from 2025")
+- source_url: Primary source URL (REQUIRED)
+
+IMPORTANT:
+- If you cannot find a specific piece of information, omit that field entirely
+- Do NOT include ratings or wait times unless you find them explicitly stated
+- Do NOT estimate or infer data
 
 Return ONLY valid JSON in this exact format:
 {
@@ -73,9 +94,14 @@ Return ONLY valid JSON in this exact format:
       "type": "pantry",
       "phone": "(555) 123-4567",
       "hours": "Mon-Fri 9AM-5PM",
-      "notes": "Serves families in need. Average wait time 30 minutes. Rated 4.5/5.",
+      "rating": 4.5,
+      "wait_time_minutes": 30,
+      "eligibility_requirements": "Must show ID and proof of residence",
+      "services_offered": "Food pantry, SNAP enrollment assistance",
+      "languages_spoken": "English, Spanish",
+      "accessibility_notes": "Wheelchair accessible, free parking lot",
       "is_verified": true,
-      "verification_notes": "Verified via official website and recent reviews from 2025",
+      "verification_notes": "Verified via official website updated January 2025 and recent Google reviews",
       "source_url": "https://example.com"
     }
   ]
