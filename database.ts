@@ -1,7 +1,7 @@
 // ABOUTME: Database schema and initialization for food pantry/bank resources
-// ABOUTME: Handles SQLite setup with resource storage and zip code search tracking
+// ABOUTME: Handles Postgres setup with resource storage and zip code search tracking
 
-import { Database } from "bun:sqlite";
+import postgres from "postgres";
 
 export interface FoodResource {
   id?: number;
@@ -48,13 +48,22 @@ export interface CountySearch {
   result_count: number;
 }
 
-export function initDatabase(): Database {
-  const db = new Database("pantry-search.db");
+export type Database = ReturnType<typeof postgres>;
+
+export async function initDatabase(): Promise<Database> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL environment variable is required");
+  }
+
+  const sql = postgres(databaseUrl, {
+    ssl: { rejectUnauthorized: false }
+  });
 
   // Create resources table
-  db.run(`
+  await sql`
     CREATE TABLE IF NOT EXISTS resources (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       address TEXT NOT NULL,
       city TEXT,
@@ -63,74 +72,53 @@ export function initDatabase(): Database {
       county_name TEXT,
       county_geoid TEXT,
       location_type TEXT,
-      latitude REAL,
-      longitude REAL,
+      latitude DOUBLE PRECISION,
+      longitude DOUBLE PRECISION,
       type TEXT NOT NULL,
       phone TEXT,
       hours TEXT,
-      rating REAL,
+      rating DOUBLE PRECISION,
       wait_time_minutes INTEGER,
       eligibility_requirements TEXT,
       services_offered TEXT,
       languages_spoken TEXT,
       accessibility_notes TEXT,
       notes TEXT,
-      is_verified INTEGER DEFAULT 0,
+      is_verified BOOLEAN DEFAULT false,
       verification_notes TEXT,
       source_url TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      last_verified_at DATETIME
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_verified_at TIMESTAMP
     )
-  `);
+  `;
 
   // Create zip searches tracking table
-  db.run(`
+  await sql`
     CREATE TABLE IF NOT EXISTS zip_searches (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       zip_code TEXT NOT NULL,
-      searched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       result_count INTEGER
     )
-  `);
+  `;
 
   // Create county searches tracking table
-  db.run(`
+  await sql`
     CREATE TABLE IF NOT EXISTS county_searches (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       county_geoid TEXT NOT NULL,
       county_name TEXT NOT NULL,
       state TEXT NOT NULL,
-      searched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       result_count INTEGER
     )
-  `);
-
-  // Add new columns if they don't exist (migration)
-  const newColumns = [
-    'county_name TEXT',
-    'county_geoid TEXT',
-    'location_type TEXT',
-    'rating REAL',
-    'wait_time_minutes INTEGER',
-    'eligibility_requirements TEXT',
-    'services_offered TEXT',
-    'languages_spoken TEXT',
-    'accessibility_notes TEXT'
-  ];
-
-  for (const column of newColumns) {
-    try {
-      db.run(`ALTER TABLE resources ADD COLUMN ${column}`);
-    } catch (e) {
-      // Column already exists
-    }
-  }
+  `;
 
   // Create indexes
-  db.run(`CREATE INDEX IF NOT EXISTS idx_zip_code ON resources(zip_code)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_county_geoid ON resources(county_geoid)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_location ON resources(latitude, longitude)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_location_type ON resources(location_type)`);
+  await sql`CREATE INDEX IF NOT EXISTS idx_zip_code ON resources(zip_code)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_county_geoid ON resources(county_geoid)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_location ON resources(latitude, longitude)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_location_type ON resources(location_type)`;
 
-  return db;
+  return sql;
 }

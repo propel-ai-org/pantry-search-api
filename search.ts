@@ -1,8 +1,7 @@
 // ABOUTME: Search functionality for finding and verifying food resources
 // ABOUTME: Handles web search, result parsing, caching, and verification logic
 
-import type { Database } from "bun:sqlite";
-import type { FoodResource } from "./database";
+import type { Database, FoodResource } from "./database";
 import { searchWithOpenAI } from "./openai-search";
 import { filterBySource } from "./source-filter";
 import { enrichWithGooglePlaces } from "./google-places";
@@ -22,7 +21,7 @@ export async function searchFoodResources(
   zipCode: string
 ): Promise<SearchResult> {
   // Check for cached results first
-  const cachedResults = getCachedResults(db, zipCode);
+  const cachedResults = await getCachedResults(db, zipCode);
   if (cachedResults) {
     return cachedResults;
   }
@@ -55,45 +54,40 @@ export async function searchFoodResources(
   );
 
   // Store results in database
-  const storedResults = storeResults(db, enrichedResults, zipCode);
+  const storedResults = await storeResults(db, enrichedResults, zipCode);
 
   // Record search
-  recordSearch(db, zipCode, storedResults.length);
+  await recordSearch(db, zipCode, storedResults.length);
 
   return categorizeResults(storedResults, false);
 }
 
-function getCachedResults(
+async function getCachedResults(
   db: Database,
   zipCode: string
-): SearchResult | null {
+): Promise<SearchResult | null> {
   const expiryDate = new Date();
   expiryDate.setDate(expiryDate.getDate() - CACHE_EXPIRY_DAYS);
-  const expiryTimestamp = expiryDate.toISOString();
 
   // Check if we have a recent search for this zip
-  const recentSearch = db
-    .query<ZipSearch, string>(
-      `SELECT * FROM zip_searches
-       WHERE zip_code = ?
-       AND searched_at > ?
-       ORDER BY searched_at DESC
-       LIMIT 1`
-    )
-    .get(zipCode, expiryTimestamp);
+  const recentSearch = await db<ZipSearch[]>`
+    SELECT * FROM zip_searches
+    WHERE zip_code = ${zipCode}
+    AND searched_at > ${expiryDate}
+    ORDER BY searched_at DESC
+    LIMIT 1
+  `;
 
-  if (!recentSearch) {
+  if (recentSearch.length === 0) {
     return null;
   }
 
   // Get cached resources
-  const resources = db
-    .query<FoodResource, string>(
-      `SELECT * FROM resources
-       WHERE zip_code = ?
-       ORDER BY name`
-    )
-    .all(zipCode);
+  const resources = await db<FoodResource[]>`
+    SELECT * FROM resources
+    WHERE zip_code = ${zipCode}
+    ORDER BY name
+  `;
 
   if (resources.length === 0) {
     return null;
@@ -118,59 +112,58 @@ function deduplicateResults(
   return Array.from(seen.values());
 }
 
-function storeResults(
+async function storeResults(
   db: Database,
   results: Partial<FoodResource>[],
   zipCode: string
-): FoodResource[] {
+): Promise<FoodResource[]> {
   const stored: FoodResource[] = [];
 
-  const insertStmt = db.prepare(`
-    INSERT INTO resources (
-      name, address, city, state, zip_code, latitude, longitude,
-      type, phone, hours, rating, wait_time_minutes, eligibility_requirements,
-      services_offered, languages_spoken, accessibility_notes, notes,
-      is_verified, verification_notes, source_url, location_type
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
   for (const result of results) {
-    insertStmt.run(
-      result.name || "",
-      result.address || "",
-      result.city || null,
-      result.state || null,
-      zipCode,
-      result.latitude || null,
-      result.longitude || null,
-      result.type || "mixed",
-      result.phone || null,
-      result.hours || null,
-      result.rating || null,
-      result.wait_time_minutes || null,
-      result.eligibility_requirements || null,
-      result.services_offered || null,
-      result.languages_spoken || null,
-      result.accessibility_notes || null,
-      result.notes || null,
-      result.is_verified ? 1 : 0,
-      result.verification_notes || null,
-      result.source_url || null,
-      "zip"
-    );
+    const inserted = await db<{ id: number }[]>`
+      INSERT INTO resources (
+        name, address, city, state, zip_code, latitude, longitude,
+        type, phone, hours, rating, wait_time_minutes, eligibility_requirements,
+        services_offered, languages_spoken, accessibility_notes, notes,
+        is_verified, verification_notes, source_url, location_type
+      ) VALUES (
+        ${result.name || ""},
+        ${result.address || ""},
+        ${result.city || null},
+        ${result.state || null},
+        ${zipCode},
+        ${result.latitude || null},
+        ${result.longitude || null},
+        ${result.type || "mixed"},
+        ${result.phone || null},
+        ${result.hours || null},
+        ${result.rating || null},
+        ${result.wait_time_minutes || null},
+        ${result.eligibility_requirements || null},
+        ${result.services_offered || null},
+        ${result.languages_spoken || null},
+        ${result.accessibility_notes || null},
+        ${result.notes || null},
+        ${result.is_verified || false},
+        ${result.verification_notes || null},
+        ${result.source_url || null},
+        ${"zip"}
+      )
+      RETURNING id
+    `;
 
-    const id = db.query("SELECT last_insert_rowid() as id").get() as { id: number };
-    stored.push({ ...result, id: id.id } as FoodResource);
+    if (inserted.length > 0) {
+      stored.push({ ...result, id: inserted[0].id } as FoodResource);
+    }
   }
 
   return stored;
 }
 
-function recordSearch(db: Database, zipCode: string, resultCount: number): void {
-  db.run(
-    `INSERT INTO zip_searches (zip_code, result_count) VALUES (?, ?)`,
-    [zipCode, resultCount]
-  );
+async function recordSearch(db: Database, zipCode: string, resultCount: number): Promise<void> {
+  await db`
+    INSERT INTO zip_searches (zip_code, result_count) VALUES (${zipCode}, ${resultCount})
+  `;
 }
 
 function categorizeResults(

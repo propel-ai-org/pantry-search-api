@@ -6,7 +6,7 @@ import { searchFoodResources } from "./search";
 import { searchFoodResourcesByCounty } from "./county-search";
 import { findCounty } from "./counties";
 
-const db = initDatabase();
+const db = await initDatabase();
 
 const server = Bun.serve({
   port: process.env.PORT || 3000,

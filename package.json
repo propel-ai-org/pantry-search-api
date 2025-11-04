@@ -12,6 +12,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
     "@googlemaps/google-maps-services-js": "^3.4.2",
-    "openai": "^6.7.0"
+    "openai": "^6.7.0",
+    "postgres": "^3.4.7"
   }
 }

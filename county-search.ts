@@ -1,8 +1,7 @@
 // ABOUTME: County-based search functionality for food resources
 // ABOUTME: Handles searching by county name/state with caching
 
-import type { Database } from "bun:sqlite";
-import type { FoodResource, CountySearch } from "./database";
+import type { Database, FoodResource, CountySearch } from "./database";
 import { searchWithOpenAI } from "./openai-search";
 import { filterBySource } from "./source-filter";
 import { enrichWithGooglePlaces } from "./google-places";
@@ -23,7 +22,7 @@ export async function searchFoodResourcesByCounty(
   county: County
 ): Promise<SearchResult> {
   // Check for cached results first
-  const cachedResults = getCachedCountyResults(db, county.geoid);
+  const cachedResults = await getCachedCountyResults(db, county.geoid);
   if (cachedResults) {
     return cachedResults;
   }
@@ -57,45 +56,40 @@ export async function searchFoodResourcesByCounty(
   );
 
   // Store results in database
-  const storedResults = storeCountyResults(db, enrichedResults, county);
+  const storedResults = await storeCountyResults(db, enrichedResults, county);
 
   // Record search
-  recordCountySearch(db, county, storedResults.length);
+  await recordCountySearch(db, county, storedResults.length);
 
   return categorizeResults(storedResults, false);
 }
 
-function getCachedCountyResults(
+async function getCachedCountyResults(
   db: Database,
   countyGeoid: string
-): SearchResult | null {
+): Promise<SearchResult | null> {
   const expiryDate = new Date();
   expiryDate.setDate(expiryDate.getDate() - CACHE_EXPIRY_DAYS);
-  const expiryTimestamp = expiryDate.toISOString();
 
   // Check if we have a recent search for this county
-  const recentSearch = db
-    .query<CountySearch, string>(
-      `SELECT * FROM county_searches
-       WHERE county_geoid = ?
-       AND searched_at > ?
-       ORDER BY searched_at DESC
-       LIMIT 1`
-    )
-    .get(countyGeoid, expiryTimestamp);
+  const recentSearch = await db<CountySearch[]>`
+    SELECT * FROM county_searches
+    WHERE county_geoid = ${countyGeoid}
+    AND searched_at > ${expiryDate}
+    ORDER BY searched_at DESC
+    LIMIT 1
+  `;
 
-  if (!recentSearch) {
+  if (recentSearch.length === 0) {
     return null;
   }
 
   // Get cached resources
-  const resources = db
-    .query<FoodResource, string>(
-      `SELECT * FROM resources
-       WHERE county_geoid = ?
-       ORDER BY name`
-    )
-    .all(countyGeoid);
+  const resources = await db<FoodResource[]>`
+    SELECT * FROM resources
+    WHERE county_geoid = ${countyGeoid}
+    ORDER BY name
+  `;
 
   if (resources.length === 0) {
     return null;
@@ -120,68 +114,65 @@ function deduplicateResults(
   return Array.from(seen.values());
 }
 
-function storeCountyResults(
+async function storeCountyResults(
   db: Database,
   results: Partial<FoodResource>[],
   county: County
-): FoodResource[] {
+): Promise<FoodResource[]> {
   const stored: FoodResource[] = [];
 
-  const insertStmt = db.prepare(`
-    INSERT INTO resources (
-      name, address, city, state, zip_code, county_name, county_geoid, location_type,
-      latitude, longitude, type, phone, hours, rating, wait_time_minutes,
-      eligibility_requirements, services_offered, languages_spoken, accessibility_notes,
-      notes, is_verified, verification_notes, source_url
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
   for (const result of results) {
-    insertStmt.run(
-      result.name || "",
-      result.address || "",
-      result.city || null,
-      result.state || county.state,
-      result.zip_code || null,
-      county.name,
-      county.geoid,
-      "county",
-      result.latitude || null,
-      result.longitude || null,
-      result.type || "mixed",
-      result.phone || null,
-      result.hours || null,
-      result.rating || null,
-      result.wait_time_minutes || null,
-      result.eligibility_requirements || null,
-      result.services_offered || null,
-      result.languages_spoken || null,
-      result.accessibility_notes || null,
-      result.notes || null,
-      result.is_verified ? 1 : 0,
-      result.verification_notes || null,
-      result.source_url || null
-    );
+    const inserted = await db<{ id: number }[]>`
+      INSERT INTO resources (
+        name, address, city, state, zip_code, county_name, county_geoid, location_type,
+        latitude, longitude, type, phone, hours, rating, wait_time_minutes,
+        eligibility_requirements, services_offered, languages_spoken, accessibility_notes,
+        notes, is_verified, verification_notes, source_url
+      ) VALUES (
+        ${result.name || ""},
+        ${result.address || ""},
+        ${result.city || null},
+        ${result.state || county.state},
+        ${result.zip_code || null},
+        ${county.name},
+        ${county.geoid},
+        ${"county"},
+        ${result.latitude || null},
+        ${result.longitude || null},
+        ${result.type || "mixed"},
+        ${result.phone || null},
+        ${result.hours || null},
+        ${result.rating || null},
+        ${result.wait_time_minutes || null},
+        ${result.eligibility_requirements || null},
+        ${result.services_offered || null},
+        ${result.languages_spoken || null},
+        ${result.accessibility_notes || null},
+        ${result.notes || null},
+        ${result.is_verified || false},
+        ${result.verification_notes || null},
+        ${result.source_url || null}
+      )
+      RETURNING id
+    `;
 
-    const id = db.query("SELECT last_insert_rowid() as id").get() as {
-      id: number;
-    };
-    stored.push({ ...result, id: id.id } as FoodResource);
+    if (inserted.length > 0) {
+      stored.push({ ...result, id: inserted[0].id } as FoodResource);
+    }
   }
 
   return stored;
 }
 
-function recordCountySearch(
+async function recordCountySearch(
   db: Database,
   county: County,
   resultCount: number
-): void {
-  db.run(
-    `INSERT INTO county_searches (county_geoid, county_name, state, result_count)
-     VALUES (?, ?, ?, ?)`,
-    [county.geoid, county.name, county.state, resultCount]
-  );
+): Promise<void> {
+  await db`
+    INSERT INTO county_searches (county_geoid, county_name, state, result_count)
+    VALUES (${county.geoid}, ${county.name}, ${county.state}, ${resultCount})
+  `;
 }
 
 function categorizeResults(
