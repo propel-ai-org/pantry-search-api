@@ -52,9 +52,14 @@ export async function searchWithOpenAI(
       input: `Search for food pantries and food banks ${locationPhrase}.
 
 I need you to:
-1. Find up to 10 food resources (pantries, food banks, or facilities that provide both)
-2. For each resource, verify it is currently operating (not permanently closed)
-3. Extract ONLY factual, verifiable information - do NOT make up or estimate any data
+1. Find AS MANY food resources as possible - aim for 20-30 or more (pantries, food banks, or facilities that provide both)
+2. Look for and FOLLOW LINKS to:
+   - Directory pages and lists maintained by food banks, counties, or community organizations
+   - "Find Food" locator pages that list multiple locations
+   - State or county government food assistance pages
+3. Cast a wide net - look at multiple sources, directories, and neighborhood-specific resources
+4. For each resource found (whether from search results OR from following directory links), verify it is currently operating (not permanently closed)
+5. Extract ONLY factual, verifiable information - do NOT make up or estimate any data
 
 For each verified resource, provide these fields ONLY if you have concrete evidence:
 - name: The official name (REQUIRED)
@@ -116,14 +121,50 @@ Return ONLY valid JSON in this exact format:
 
     console.log("OpenAI response preview:", outputText.substring(0, 500));
 
-    // Parse JSON from response
+    // Parse JSON from response - handle truncated responses
+    let jsonText = outputText;
+
+    // Try to find JSON block
     const jsonMatch = outputText.match(/\{[\s\S]*"resources"[\s\S]*\}/);
     if (!jsonMatch) {
       console.error("Full response:", outputText);
       throw new Error("No JSON found in OpenAI response");
     }
 
-    const result: OpenAISearchResult = JSON.parse(jsonMatch[0]);
+    jsonText = jsonMatch[0];
+
+    // Try to fix truncated JSON arrays by adding closing brackets
+    let result: OpenAISearchResult;
+    try {
+      result = JSON.parse(jsonText);
+    } catch (parseError) {
+      console.warn("Initial JSON parse failed, attempting to fix truncated response...");
+
+      // Count opening and closing brackets
+      const openBrackets = (jsonText.match(/\[/g) || []).length;
+      const closeBrackets = (jsonText.match(/\]/g) || []).length;
+      const openBraces = (jsonText.match(/\{/g) || []).length;
+      const closeBraces = (jsonText.match(/\}/g) || []).length;
+
+      // Add missing closing brackets/braces
+      let fixedJson = jsonText;
+      for (let i = 0; i < openBrackets - closeBrackets; i++) {
+        fixedJson += "]";
+      }
+      for (let i = 0; i < openBraces - closeBraces; i++) {
+        fixedJson += "}";
+      }
+
+      try {
+        result = JSON.parse(fixedJson);
+        console.log("Successfully recovered truncated JSON");
+      } catch (secondError) {
+        console.error("Could not fix JSON. Original:", jsonText.substring(jsonText.length - 200));
+        throw parseError;
+      }
+    }
+
+    console.log(`OpenAI returned ${result.resources.length} resources`);
 
     return result.resources;
   } catch (error) {

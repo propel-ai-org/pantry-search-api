@@ -27,22 +27,57 @@ export async function searchFoodResourcesByCounty(
     return cachedResults;
   }
 
-  // Perform fresh search using OpenAI web search
+  // Perform multiple searches to get comprehensive coverage
   console.log(`Performing fresh search for ${county.name}, ${county.state}`);
 
-  const searchQuery = `${county.name}, ${county.state}`;
-  const searchResults = await searchWithOpenAI(searchQuery, "county");
+  const searches = [
+    `food pantries food banks in ${county.name}, ${county.state}`,
+    `list of food pantries ${county.name} ${county.state} directory`,
+    `${county.name} ${county.state} food assistance locations`
+  ];
+
+  const allResults: Partial<FoodResource>[] = [];
+
+  for (const query of searches) {
+    console.log(`  Search: "${query}"`);
+    const results = await searchWithOpenAI(query, "county");
+    allResults.push(...results);
+    // Small delay between searches
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  console.log(`Combined results from ${searches.length} searches: ${allResults.length} total resources`);
 
   // Deduplicate results
-  const uniqueResults = deduplicateResults(searchResults);
+  const uniqueResults = deduplicateResults(allResults);
 
   // Filter by source to exclude unreliable domains
   const filteredResults = filterBySource(uniqueResults);
 
+  // Check against existing resources to avoid duplicate verification
+  const existingResources = await db<FoodResource[]>`
+    SELECT name, address, latitude, longitude FROM resources
+  `;
+
+  const alreadyVerified = new Set(
+    existingResources.map(
+      (r) => `${r.name?.toLowerCase()}-${r.address?.toLowerCase()}`
+    )
+  );
+
+  const needsEnrichment = filteredResults.filter((result) => {
+    const key = `${result.name?.toLowerCase()}-${result.address?.toLowerCase()}`;
+    return !alreadyVerified.has(key);
+  });
+
+  console.log(
+    `${filteredResults.length} unique results, ${filteredResults.length - needsEnrichment.length} already in database, ${needsEnrichment.length} need enrichment`
+  );
+
   // Enrich with Google Places API (this filters out places we can't verify)
-  console.log(`Enriching ${filteredResults.length} results with Google Places...`);
+  console.log(`Enriching ${needsEnrichment.length} results with Google Places...`);
   const enrichedResults: Partial<FoodResource>[] = [];
-  for (const result of filteredResults) {
+  for (const result of needsEnrichment) {
     const enriched = await enrichWithGooglePlaces(result);
     if (enriched) {
       enrichedResults.push(enriched);
@@ -52,7 +87,7 @@ export async function searchFoodResourcesByCounty(
   }
 
   console.log(
-    `Successfully enriched ${enrichedResults.length}/${filteredResults.length} results`
+    `Successfully enriched ${enrichedResults.length}/${needsEnrichment.length} results`
   );
 
   // Store results in database

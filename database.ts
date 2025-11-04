@@ -57,7 +57,8 @@ export async function initDatabase(): Promise<Database> {
   }
 
   const sql = postgres(databaseUrl, {
-    ssl: { rejectUnauthorized: false }
+    ssl: { rejectUnauthorized: false },
+    onnotice: () => {} // Suppress NOTICE messages
   });
 
   // Create resources table
