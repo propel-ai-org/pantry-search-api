@@ -35,12 +35,13 @@ const BLOCKED_NAME_PATTERNS = [
   /^feedingamerica$/i,
 ];
 
-// URL patterns that indicate general government/organizational sites (not food-specific)
+// URL patterns that indicate general government sites (not food-specific)
 const BLOCKED_URL_PATTERNS = [
-  // General government homepages without food-specific paths
-  /\.(gov|org)$/i, // Root domain without specific page
-  /\.(gov|org)\/?$/i,
-  /\/(about|contact|home|index)\/?$/i, // Generic pages
+  // Only filter .gov domains at root level - they're more likely to be generic government sites
+  /\.gov$/i, // Root .gov domain without specific page
+  /\.gov\/?$/i,
+  // Filter generic pages on .gov domains
+  /\.gov\/(about|contact|home|index)\/?$/i,
 ];
 
 export function filterBySource(
