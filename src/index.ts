@@ -227,6 +227,85 @@ const server = Bun.serve({
       }
     }
 
+    if (url.pathname === "/export" && req.method === "GET") {
+      const state = url.searchParams.get("state") || undefined;
+      const limit = url.searchParams.get("limit")
+        ? parseInt(url.searchParams.get("limit")!)
+        : undefined;
+
+      try {
+        // Get all resources (or filtered by state)
+        const resources = await db<FoodResource[]>`
+          SELECT * FROM resources
+          ${state ? db`WHERE state = ${state.toUpperCase()}` : db``}
+          ORDER BY created_at DESC
+          ${limit ? db`LIMIT ${limit}` : db``}
+        `;
+
+        // Transform to app format
+        const exportData = resources.map(resource => {
+          // Map type to store_type format
+          let storeType = "Food Pantry";
+          if (resource.type === "bank") storeType = "Food Bank";
+          else if (resource.type === "mixed") storeType = "Food Pantry";
+
+          // Build description from available fields
+          const descParts = [];
+          if (resource.hours) descParts.push(`Hours: ${resource.hours}`);
+          if (resource.eligibility_requirements) descParts.push(resource.eligibility_requirements);
+          if (resource.services_offered) descParts.push(`Services: ${resource.services_offered}`);
+          if (resource.notes) descParts.push(resource.notes);
+
+          return {
+            source: "pantry-search-api",
+            source_url: resource.source_url || "",
+            source_record_id: resource.id?.toString() || "",
+            source_objectid: resource.google_place_id || "",
+            store_name: resource.name,
+            store_street_address: resource.address,
+            additional_address: "",
+            city: resource.city || "",
+            state: resource.state || "",
+            zip4: "",
+            county: resource.county_name || "",
+            store_type: storeType,
+            latitude: resource.latitude?.toString() || "",
+            longitude: resource.longitude?.toString() || "",
+            incentive_program: "",
+            grantee_name: "",
+            first_scraped_at: resource.created_at || new Date().toISOString(),
+            last_scraped_at: resource.last_verified_at || resource.created_at || new Date().toISOString(),
+            address: resource.address,
+            zip5: resource.zip_code || "",
+            phone: resource.phone || "",
+            description: descParts.join(". "),
+            url: resource.source_url || "",
+            url_facebook: "",
+            url_instagram: "",
+            url_twitter: "",
+            url_youtube: "",
+          };
+        });
+
+        return new Response(JSON.stringify(exportData, null, 2), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (error) {
+        console.error("Export error:", error);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to export resources",
+            details: error instanceof Error ? error.message : String(error),
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
     return new Response("Not Found", { status: 404 });
   },
 });
