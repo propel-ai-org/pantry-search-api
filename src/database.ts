@@ -28,6 +28,10 @@ export interface FoodResource {
   is_verified: boolean;
   verification_notes?: string;
   source_url?: string;
+  url_facebook?: string;
+  url_twitter?: string;
+  url_instagram?: string;
+  url_youtube?: string;
   created_at?: string;
   last_verified_at?: string;
   needs_enrichment?: boolean;

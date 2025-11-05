@@ -2,6 +2,7 @@
 // ABOUTME: Verifies addresses, gets coordinates, and checks operational status
 
 import type { FoodResource } from "./database";
+import { extractSocialMediaLinks } from "./social-media-extractor";
 
 const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
@@ -160,6 +161,13 @@ export async function enrichWithGooglePlaces(
       `  ✅ Found: ${candidate.formatted_address} (${candidate.geometry.location.lat}, ${candidate.geometry.location.lng})`
     );
 
+    // Extract social media links from the website
+    const websiteUrl = detailsData.result.website || resource.source_url;
+    let socialMediaLinks = {};
+    if (websiteUrl) {
+      socialMediaLinks = await extractSocialMediaLinks(websiteUrl);
+    }
+
     return {
       data: {
         ...resource,
@@ -175,7 +183,11 @@ export async function enrichWithGooglePlaces(
           resource.phone ||
           candidate.formatted_phone_number,
         hours: hours,
-        source_url: detailsData.result.website || resource.source_url,
+        source_url: websiteUrl,
+        url_facebook: socialMediaLinks.facebook || resource.url_facebook,
+        url_twitter: socialMediaLinks.twitter || resource.url_twitter,
+        url_instagram: socialMediaLinks.instagram || resource.url_instagram,
+        url_youtube: socialMediaLinks.youtube || resource.url_youtube,
         is_verified: true,
         verification_notes: `Verified via Google Places API (place_id: ${candidate.place_id})${candidate.user_ratings_total ? ` with ${candidate.user_ratings_total} reviews` : ""}`,
         google_place_id: candidate.place_id,

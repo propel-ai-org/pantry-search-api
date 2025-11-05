@@ -280,10 +280,10 @@ const server = Bun.serve({
             phone: resource.phone || "",
             description: descParts.join(". "),
             url: resource.source_url || "",
-            url_facebook: "",
-            url_instagram: "",
-            url_twitter: "",
-            url_youtube: "",
+            url_facebook: resource.url_facebook || "",
+            url_instagram: resource.url_instagram || "",
+            url_twitter: resource.url_twitter || "",
+            url_youtube: resource.url_youtube || "",
           };
         });
 
