@@ -1,1 +1,1 @@
-web: bun index.ts
+web: bun src/index.ts
