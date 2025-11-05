@@ -103,9 +103,16 @@ function deduplicateResults(
   const seen = new Map<string, Partial<FoodResource>>();
 
   for (const result of results) {
-    const key = `${result.name?.toLowerCase()}-${result.address?.toLowerCase()}`;
-    if (!seen.has(key)) {
+    // Deduplicate by address only - same physical location should only appear once
+    const key = result.address?.toLowerCase().trim() || '';
+    if (!seen.has(key) || !key) {
       seen.set(key, result);
+    } else {
+      // Keep the entry with the more descriptive name (longer is usually better)
+      const existing = seen.get(key)!;
+      if ((result.name?.length || 0) > (existing.name?.length || 0)) {
+        seen.set(key, result);
+      }
     }
   }
 
