@@ -46,31 +46,40 @@ export async function extractSocialMediaLinks(
       return {};
     }
 
-    // Extract social media URLs using regex
+    // Extract social media URLs - find ALL matches, then filter
     const links: SocialMediaLinks = {};
 
-    // Facebook
-    const fbMatch = html.match(/(?:https?:\/\/)?(?:www\.)?facebook\.com\/[a-zA-Z0-9._-]+/i);
-    if (fbMatch) {
-      links.facebook = normalizeUrl(fbMatch[0], 'facebook.com');
+    // Facebook - find all matches
+    const fbMatches = html.matchAll(/(?:https?:\/\/)?(?:www\.)?facebook\.com\/([a-zA-Z0-9._-]+)/gi);
+    const fbUrls = Array.from(fbMatches).map(m => m[1]).filter(isValidSocialHandle);
+    if (fbUrls.length > 0) {
+      // Prefer the most common one, or the first valid one
+      const bestFb = findMostCommon(fbUrls);
+      links.facebook = normalizeUrl(`facebook.com/${bestFb}`, 'facebook.com');
     }
 
-    // Twitter/X
-    const twitterMatch = html.match(/(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/[a-zA-Z0-9_]+/i);
-    if (twitterMatch) {
-      links.twitter = normalizeUrl(twitterMatch[0], 'twitter.com');
+    // Twitter/X - find all matches
+    const twitterMatches = html.matchAll(/(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]+)/gi);
+    const twitterUrls = Array.from(twitterMatches).map(m => m[1]).filter(isValidSocialHandle);
+    if (twitterUrls.length > 0) {
+      const bestTwitter = findMostCommon(twitterUrls);
+      links.twitter = normalizeUrl(`twitter.com/${bestTwitter}`, 'twitter.com');
     }
 
-    // Instagram
-    const instaMatch = html.match(/(?:https?:\/\/)?(?:www\.)?instagram\.com\/[a-zA-Z0-9._]+/i);
-    if (instaMatch) {
-      links.instagram = normalizeUrl(instaMatch[0], 'instagram.com');
+    // Instagram - find all matches
+    const instaMatches = html.matchAll(/(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9._]+)/gi);
+    const instaUrls = Array.from(instaMatches).map(m => m[1]).filter(isValidSocialHandle);
+    if (instaUrls.length > 0) {
+      const bestInsta = findMostCommon(instaUrls);
+      links.instagram = normalizeUrl(`instagram.com/${bestInsta}`, 'instagram.com');
     }
 
-    // YouTube
-    const youtubeMatch = html.match(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/(?:channel\/|user\/|c\/|@)?[a-zA-Z0-9_-]+/i);
-    if (youtubeMatch) {
-      links.youtube = normalizeUrl(youtubeMatch[0], 'youtube.com');
+    // YouTube - find all matches
+    const youtubeMatches = html.matchAll(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/(?:channel\/|user\/|c\/|@)?([a-zA-Z0-9_-]+)/gi);
+    const youtubeUrls = Array.from(youtubeMatches).map(m => m[1]).filter(isValidSocialHandle);
+    if (youtubeUrls.length > 0) {
+      const bestYoutube = findMostCommon(youtubeUrls);
+      links.youtube = normalizeUrl(`youtube.com/${bestYoutube}`, 'youtube.com');
     }
 
     const foundLinks = Object.keys(links).length;
@@ -102,6 +111,40 @@ function normalizeUrl(url: string, domain: string): string {
   url = url.replace('://www.', '://');
 
   return url;
+}
+
+function isValidSocialHandle(handle: string): boolean {
+  // Filter out generic/invalid social media handles
+  const invalidHandles = new Set([
+    'groups', 'pages', 'share', 'sharer', 'home', 'login', 'signup',
+    'about', 'privacy', 'terms', 'help', 'support', 'contact',
+    'intent', 'share', 'hashtag', 'search', 'explore', 'p', 'reel',
+    'watch', 'playlist', 'embed', 'oembed', 'plugins', 'dialog',
+    'SF', 'sfgov', 'bolt', 'pharmacy', // Common generic ones we've seen
+  ]);
+
+  // Must be at least 3 characters and not in the invalid list
+  return handle.length >= 3 && !invalidHandles.has(handle);
+}
+
+function findMostCommon(handles: string[]): string {
+  // Count occurrences of each handle
+  const counts = new Map<string, number>();
+  for (const handle of handles) {
+    counts.set(handle, (counts.get(handle) || 0) + 1);
+  }
+
+  // Return the most common one (or first if tie)
+  let best = handles[0];
+  let maxCount = 1;
+  for (const [handle, count] of counts.entries()) {
+    if (count > maxCount) {
+      maxCount = count;
+      best = handle;
+    }
+  }
+
+  return best;
 }
 
 function validateWebsiteMatchesName(html: string, resourceName: string): boolean {

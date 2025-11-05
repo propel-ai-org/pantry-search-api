@@ -257,7 +257,7 @@ const server = Bun.serve({
           if (resource.notes) descParts.push(resource.notes);
 
           return {
-            source: "pantry-search-api",
+            source: "county-search",
             source_url: resource.source_url || "",
             source_record_id: resource.id?.toString() || "",
             source_objectid: resource.google_place_id || "",

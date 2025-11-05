@@ -3,6 +3,7 @@
 
 import type { Database, FoodResource, CountySearch } from "./database";
 import { searchWithOpenAI } from "./openai-search";
+import { searchGooglePlaces } from "./google-places-search";
 import { filterBySource } from "./source-filter";
 import { enrichWithGooglePlaces } from "./google-places";
 import type { County } from "./counties";
@@ -30,12 +31,20 @@ export async function searchFoodResourcesByCounty(
   // Perform multiple searches to get comprehensive coverage
   console.log(`Performing fresh search for ${county.name}, ${county.state}`);
 
+  const allResults: Partial<FoodResource>[] = [];
+
+  // 1. Search using Google Places API (most reliable for discovery)
+  console.log(`\nSearching Google Places API...`);
+  const googleResults = await searchGooglePlaces(county);
+  allResults.push(...googleResults);
+  console.log(`Google Places found ${googleResults.length} resources`);
+
+  // 2. Search using OpenAI web search (catches resources not in Google Places)
+  console.log(`\nSearching via OpenAI web search...`);
   const searches = [
     `food pantries food banks in ${county.name}, ${county.state}`,
     `list of food pantries ${county.name} ${county.state} directory`
   ];
-
-  const allResults: Partial<FoodResource>[] = [];
 
   for (const query of searches) {
     console.log(`  Search: "${query}"`);
@@ -45,7 +54,7 @@ export async function searchFoodResourcesByCounty(
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
-  console.log(`Combined results from ${searches.length} searches: ${allResults.length} total resources`);
+  console.log(`\nCombined results: ${allResults.length} total resources from Google Places + OpenAI`);
 
   // Deduplicate results
   const uniqueResults = deduplicateResults(allResults);
@@ -68,34 +77,59 @@ export async function searchFoodResourcesByCounty(
     `${filteredResults.length} after name/source filtering, ${geoFilteredResults.length} after geographic filtering`
   );
 
-  // Check against existing resources to avoid duplicate addresses
+  // Check against existing resources
   const existingResources = await db<FoodResource[]>`
-    SELECT name, address, latitude, longitude FROM resources
+    SELECT id, name, address, latitude, longitude, google_place_id, needs_enrichment, enrichment_failure_count FROM resources
   `;
 
-  const alreadyVerified = new Set(
-    existingResources.map(
-      (r) => r.address?.toLowerCase().trim() || ''
-    )
-  );
+  const existingByAddress = new Map<string, FoodResource>();
+  for (const resource of existingResources) {
+    const key = resource.address?.toLowerCase().trim() || '';
+    if (key) {
+      existingByAddress.set(key, resource);
+    }
+  }
 
-  const needsEnrichment = geoFilteredResults.filter((result) => {
+  const needsStorage: Partial<FoodResource>[] = [];
+  const needsUpdate: Array<{ id: number; data: Partial<FoodResource> }> = [];
+
+  for (const result of geoFilteredResults) {
     const key = result.address?.toLowerCase().trim() || '';
-    return !alreadyVerified.has(key);
-  });
+    const existing = existingByAddress.get(key);
+
+    if (!existing) {
+      // New resource - store it
+      needsStorage.push(result);
+    } else if (shouldUpdateExisting(existing, result)) {
+      // Better data available - update the existing record
+      needsUpdate.push({ id: existing.id, data: result });
+    }
+    // else: existing record is good, skip this result
+  }
 
   console.log(
-    `${geoFilteredResults.length} unique results, ${geoFilteredResults.length - needsEnrichment.length} already in database, ${needsEnrichment.length} need storage`
+    `${geoFilteredResults.length} unique results: ${needsStorage.length} new, ${needsUpdate.length} updates, ${geoFilteredResults.length - needsStorage.length - needsUpdate.length} skip (already have good data)`
   );
 
-  // Store results without Google Places enrichment (mark as needing enrichment)
-  console.log(`Storing ${needsEnrichment.length} results (enrichment will happen in background)...`);
-  const storedResults = await storeCountyResults(db, needsEnrichment, county);
+  // Update existing records with better data
+  if (needsUpdate.length > 0) {
+    console.log(`Updating ${needsUpdate.length} existing records with better data...`);
+    await updateExistingResources(db, needsUpdate);
+  }
+
+  // Store new results
+  console.log(`Storing ${needsStorage.length} new results (enrichment will happen in background)...`);
+  const storedResults = await storeCountyResults(db, needsStorage, county);
+
+  // Fetch all resources for this county to return (including updated ones)
+  const allCountyResources = await db<FoodResource[]>`
+    SELECT * FROM resources WHERE county_geoid = ${county.geoid}
+  `;
 
   // Record search
-  await recordCountySearch(db, county, storedResults.length);
+  await recordCountySearch(db, county, needsStorage.length + needsUpdate.length);
 
-  return categorizeResults(storedResults, false);
+  return categorizeResults(allCountyResources, false);
 }
 
 async function getCachedCountyResults(
@@ -168,7 +202,8 @@ async function storeCountyResults(
         name, address, city, state, zip_code, county_name, county_geoid, location_type,
         latitude, longitude, type, phone, hours, rating, wait_time_minutes,
         eligibility_requirements, services_offered, languages_spoken, accessibility_notes,
-        notes, is_verified, verification_notes, source_url, needs_enrichment
+        notes, is_verified, verification_notes, source_url, google_place_id, needs_enrichment,
+        url_facebook, url_twitter, url_instagram, url_youtube
       ) VALUES (
         ${result.name || ""},
         ${result.address || ""},
@@ -193,7 +228,12 @@ async function storeCountyResults(
         ${result.is_verified || false},
         ${result.verification_notes || null},
         ${result.source_url || null},
-        ${true}
+        ${result.google_place_id || null},
+        ${result.google_place_id ? false : true},
+        ${result.url_facebook || null},
+        ${result.url_twitter || null},
+        ${result.url_instagram || null},
+        ${result.url_youtube || null}
       )
       RETURNING id
     `;
@@ -228,4 +268,70 @@ function categorizeResults(
     cached,
     search_timestamp: new Date().toISOString(),
   };
+}
+
+/**
+ * Determine if we should update an existing resource with new data
+ * Returns true if the new data is better than what we have
+ */
+function shouldUpdateExisting(
+  existing: Partial<FoodResource>,
+  newData: Partial<FoodResource>
+): boolean {
+  // If new data has Google Place ID and existing doesn't, update
+  if (newData.google_place_id && !existing.google_place_id) {
+    return true;
+  }
+
+  // If new data has coordinates and existing doesn't, update
+  if (newData.latitude && newData.longitude && (!existing.latitude || !existing.longitude)) {
+    return true;
+  }
+
+  // If existing needs enrichment and failed enrichment, and new data has better verification, update
+  if (existing.needs_enrichment && existing.enrichment_failure_count && existing.enrichment_failure_count > 0) {
+    if (newData.google_place_id || (newData.latitude && newData.longitude)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Update existing resources with better data
+ */
+async function updateExistingResources(
+  db: Database,
+  updates: Array<{ id: number; data: Partial<FoodResource> }>
+): Promise<void> {
+  for (const { id, data } of updates) {
+    await db`
+      UPDATE resources SET
+        name = ${data.name || null},
+        address = ${data.address || null},
+        city = ${data.city || null},
+        state = ${data.state || null},
+        zip_code = ${data.zip_code || null},
+        latitude = ${data.latitude || null},
+        longitude = ${data.longitude || null},
+        type = ${data.type || "mixed"},
+        phone = ${data.phone || null},
+        hours = ${data.hours || null},
+        rating = ${data.rating || null},
+        source_url = ${data.source_url || null},
+        google_place_id = ${data.google_place_id || null},
+        is_verified = ${data.is_verified || false},
+        verification_notes = ${data.verification_notes || null},
+        needs_enrichment = ${false},
+        enrichment_failure_count = ${0},
+        enrichment_failure_reason = ${null},
+        last_enrichment_attempt = ${new Date()},
+        url_facebook = ${data.url_facebook || null},
+        url_twitter = ${data.url_twitter || null},
+        url_instagram = ${data.url_instagram || null},
+        url_youtube = ${data.url_youtube || null}
+      WHERE id = ${id}
+    `;
+  }
 }
