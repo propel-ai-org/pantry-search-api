@@ -29,6 +29,8 @@ const BLOCKED_NAME_PATTERNS = [
   // Government offices (unless explicitly food distribution/pantry/bank)
   /\b(city hall|county office|dmv|department of)\b(?!.*\b(food|nutrition|wic|pantry|bank)\b)/i,
   /\b(borough office|municipal office)\b(?!.*\b(food|pantry|bank|distribution)\b)/i,
+  /\b(procurement|public works|administration)\b(?!.*\b(food|pantry|bank|nutrition|wic|meal|feeding)\b)/i,
+  /\b(senior citizen center|senior services)\b(?!.*\b(food|pantry|bank|meal|nutrition)\b)/i,
 
   // National umbrella organizations (not actual distribution sites)
   /^feeding america$/i,
