@@ -28,7 +28,7 @@ cp .env.example .env
 
 Required environment variables:
 - `OPENAI_API_KEY`: OpenAI API key (get from https://platform.openai.com/)
-- `GOOGLE_API_KEY`: Google Places API key (get from https://console.cloud.google.com/)
+- `GOOGLE_MAPS_API_KEY`: Google Places API key (get from https://console.cloud.google.com/)
 - `DATABASE_URL`: PostgreSQL connection string
 
 3. Run the server:
