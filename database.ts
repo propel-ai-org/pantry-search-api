@@ -30,6 +30,11 @@ export interface FoodResource {
   source_url?: string;
   created_at?: string;
   last_verified_at?: string;
+  needs_enrichment?: boolean;
+  google_place_id?: string;
+  last_enrichment_attempt?: string;
+  enrichment_failure_count?: number;
+  enrichment_failure_reason?: string;
 }
 
 export interface ZipSearch {
@@ -89,7 +94,12 @@ export async function initDatabase(): Promise<Database> {
       verification_notes TEXT,
       source_url TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      last_verified_at TIMESTAMP
+      last_verified_at TIMESTAMP,
+      needs_enrichment BOOLEAN DEFAULT false,
+      google_place_id TEXT,
+      last_enrichment_attempt TIMESTAMP,
+      enrichment_failure_count INTEGER DEFAULT 0,
+      enrichment_failure_reason TEXT
     )
   `;
 

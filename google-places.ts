@@ -20,6 +20,7 @@ interface PlacesSearchResult {
     rating?: number;
     user_ratings_total?: number;
     formatted_phone_number?: string;
+    types?: string[];
   }>;
   status: string;
 }
@@ -47,12 +48,17 @@ interface PlaceDetailsResult {
   status: string;
 }
 
+interface EnrichmentResult {
+  data: Partial<FoodResource> | null;
+  failureReason?: string;
+}
+
 export async function enrichWithGooglePlaces(
   resource: Partial<FoodResource>
-): Promise<Partial<FoodResource> | null> {
+): Promise<EnrichmentResult> {
   if (!GOOGLE_PLACES_API_KEY) {
     console.warn("Google Places API key not configured");
-    return resource;
+    return { data: resource as Partial<FoodResource>, failureReason: "API key not configured" };
   }
 
   try {
@@ -61,25 +67,69 @@ export async function enrichWithGooglePlaces(
     console.log(`Enriching: ${resource.name} with query: "${query}"`);
 
     // Find Place using Text Search
-    const searchUrl = `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(query)}&inputtype=textquery&fields=place_id,name,formatted_address,geometry,business_status,rating,user_ratings_total&key=${GOOGLE_PLACES_API_KEY}`;
+    const searchUrl = `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(query)}&inputtype=textquery&fields=place_id,name,formatted_address,geometry,business_status,rating,user_ratings_total,types&key=${GOOGLE_PLACES_API_KEY}`;
 
     const searchResponse = await fetch(searchUrl);
     const searchData: PlacesSearchResult = await searchResponse.json();
 
     if (searchData.status !== "OK" || searchData.candidates.length === 0) {
       console.log(`  ❌ Not found in Google Places`);
-      return null; // Resource not found, reject it
+      return { data: null, failureReason: "Not found in Google Places" };
     }
 
     const candidate = searchData.candidates[0];
 
     // Check if permanently closed
-    if (
-      candidate.business_status === "CLOSED_PERMANENTLY" ||
-      candidate.business_status === "CLOSED_TEMPORARILY"
-    ) {
+    if (candidate.business_status === "CLOSED_PERMANENTLY") {
       console.log(`  ⚠️  Business status: ${candidate.business_status}`);
-      return null; // Closed, reject it
+      return { data: null, failureReason: "Permanently closed" };
+    }
+
+    if (candidate.business_status === "CLOSED_TEMPORARILY") {
+      console.log(`  ⚠️  Business status: ${candidate.business_status}`);
+      return { data: null, failureReason: "Temporarily closed" };
+    }
+
+    // Validate that the name reasonably matches what we searched for
+    const matchResult = isReasonableMatch(resource.name || "", candidate.name);
+    if (!matchResult.isMatch) {
+      console.log(`  ⚠️  Name mismatch: searched for "${resource.name}", found "${candidate.name}"`);
+
+      // If it's a close match, accept it anyway
+      if (matchResult.isCloseMatch) {
+        console.log(`  ℹ️  Accepting close match (${matchResult.matchRatio.toFixed(2)} similarity)`);
+      } else {
+        return { data: null, failureReason: `Name mismatch: found "${candidate.name}"` };
+      }
+    }
+
+    // Check types to filter out non-food-assistance locations
+    if (candidate.types && candidate.types.length > 0) {
+      const blockedTypes = [
+        "school",
+        "primary_school",
+        "secondary_school",
+        "university",
+        "restaurant",
+        "cafe",
+        "meal_takeaway",
+        "meal_delivery",
+        "supermarket",
+        "grocery_or_supermarket",
+        "convenience_store",
+        "store",
+      ];
+
+      const hasBlockedType = candidate.types.some((type) =>
+        blockedTypes.includes(type)
+      );
+
+      if (hasBlockedType) {
+        console.log(
+          `  ⚠️  Blocked type: ${candidate.name} has types [${candidate.types.join(", ")}]`
+        );
+        return { data: null, failureReason: `Blocked type: ${candidate.types.join(", ")}` };
+      }
     }
 
     // Get detailed information
@@ -111,26 +161,29 @@ export async function enrichWithGooglePlaces(
     );
 
     return {
-      ...resource,
-      address: candidate.formatted_address.split(",")[0], // Street address only
-      city: city || resource.city,
-      state: state || resource.state,
-      zip_code: zipCode || resource.zip_code,
-      latitude: candidate.geometry.location.lat,
-      longitude: candidate.geometry.location.lng,
-      rating: candidate.rating || resource.rating,
-      phone:
-        detailsData.result.formatted_phone_number ||
-        resource.phone ||
-        candidate.formatted_phone_number,
-      hours: hours,
-      source_url: detailsData.result.website || resource.source_url,
-      is_verified: true,
-      verification_notes: `Verified via Google Places API (place_id: ${candidate.place_id})${candidate.user_ratings_total ? ` with ${candidate.user_ratings_total} reviews` : ""}`,
+      data: {
+        ...resource,
+        address: candidate.formatted_address.split(",")[0], // Street address only
+        city: city || resource.city,
+        state: state || resource.state,
+        zip_code: zipCode || resource.zip_code,
+        latitude: candidate.geometry.location.lat,
+        longitude: candidate.geometry.location.lng,
+        rating: candidate.rating || resource.rating,
+        phone:
+          detailsData.result.formatted_phone_number ||
+          resource.phone ||
+          candidate.formatted_phone_number,
+        hours: hours,
+        source_url: detailsData.result.website || resource.source_url,
+        is_verified: true,
+        verification_notes: `Verified via Google Places API (place_id: ${candidate.place_id})${candidate.user_ratings_total ? ` with ${candidate.user_ratings_total} reviews` : ""}`,
+        google_place_id: candidate.place_id,
+      }
     };
   } catch (error) {
     console.error(`  ❌ Error enriching ${resource.name}:`, error);
-    return null; // Failed to enrich, reject it
+    return { data: null, failureReason: `API error: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
@@ -162,4 +215,71 @@ function buildSearchQuery(resource: Partial<FoodResource>): string {
   }
 
   return parts.join(" ");
+}
+
+interface MatchResult {
+  isMatch: boolean;
+  isCloseMatch: boolean;
+  matchRatio: number;
+}
+
+function isReasonableMatch(searchedName: string, foundName: string): MatchResult {
+  // Normalize both names for comparison
+  const normalize = (str: string) =>
+    str
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "") // Remove punctuation
+      .replace(/\s+/g, " ") // Normalize whitespace
+      .trim();
+
+  const normalizedSearched = normalize(searchedName);
+  const normalizedFound = normalize(foundName);
+
+  // Extract significant words (ignore common words)
+  const commonWords = new Set([
+    "food",
+    "pantry",
+    "bank",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "of",
+    "at",
+    "in",
+    "for",
+    "to",
+    "community",
+    "center",
+    "program",
+  ]);
+
+  const getSignificantWords = (str: string) =>
+    str
+      .split(" ")
+      .filter((word) => word.length > 2 && !commonWords.has(word));
+
+  const searchedWords = new Set(getSignificantWords(normalizedSearched));
+  const foundWords = new Set(getSignificantWords(normalizedFound));
+
+  // Check if at least 50% of significant words match
+  if (searchedWords.size === 0 || foundWords.size === 0) {
+    return { isMatch: true, isCloseMatch: false, matchRatio: 1.0 }; // Can't validate, allow through
+  }
+
+  let matchCount = 0;
+  for (const word of searchedWords) {
+    if (foundWords.has(word)) {
+      matchCount++;
+    }
+  }
+
+  const matchRatio = matchCount / Math.min(searchedWords.size, foundWords.size);
+
+  return {
+    isMatch: matchRatio >= 0.5,
+    isCloseMatch: matchRatio >= 0.3, // 30% match is "close enough" to consider
+    matchRatio
+  };
 }

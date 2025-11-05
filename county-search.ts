@@ -32,8 +32,7 @@ export async function searchFoodResourcesByCounty(
 
   const searches = [
     `food pantries food banks in ${county.name}, ${county.state}`,
-    `list of food pantries ${county.name} ${county.state} directory`,
-    `${county.name} ${county.state} food assistance locations`
+    `list of food pantries ${county.name} ${county.state} directory`
   ];
 
   const allResults: Partial<FoodResource>[] = [];
@@ -51,8 +50,23 @@ export async function searchFoodResourcesByCounty(
   // Deduplicate results
   const uniqueResults = deduplicateResults(allResults);
 
-  // Filter by source to exclude unreliable domains
+  // Filter by source to exclude unreliable domains and names
   const filteredResults = filterBySource(uniqueResults);
+
+  // Filter by geography - remove results that are in the wrong state
+  const geoFilteredResults = filteredResults.filter((result) => {
+    if (result.state && result.state.toUpperCase() !== county.state.toUpperCase()) {
+      console.log(
+        `Filtering out ${result.name} - wrong state (${result.state} instead of ${county.state})`
+      );
+      return false;
+    }
+    return true;
+  });
+
+  console.log(
+    `${filteredResults.length} after name/source filtering, ${geoFilteredResults.length} after geographic filtering`
+  );
 
   // Check against existing resources to avoid duplicate verification
   const existingResources = await db<FoodResource[]>`
@@ -65,33 +79,18 @@ export async function searchFoodResourcesByCounty(
     )
   );
 
-  const needsEnrichment = filteredResults.filter((result) => {
+  const needsEnrichment = geoFilteredResults.filter((result) => {
     const key = `${result.name?.toLowerCase()}-${result.address?.toLowerCase()}`;
     return !alreadyVerified.has(key);
   });
 
   console.log(
-    `${filteredResults.length} unique results, ${filteredResults.length - needsEnrichment.length} already in database, ${needsEnrichment.length} need enrichment`
+    `${geoFilteredResults.length} unique results, ${geoFilteredResults.length - needsEnrichment.length} already in database, ${needsEnrichment.length} need storage`
   );
 
-  // Enrich with Google Places API (this filters out places we can't verify)
-  console.log(`Enriching ${needsEnrichment.length} results with Google Places...`);
-  const enrichedResults: Partial<FoodResource>[] = [];
-  for (const result of needsEnrichment) {
-    const enriched = await enrichWithGooglePlaces(result);
-    if (enriched) {
-      enrichedResults.push(enriched);
-    }
-    // Small delay to avoid rate limiting
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  console.log(
-    `Successfully enriched ${enrichedResults.length}/${needsEnrichment.length} results`
-  );
-
-  // Store results in database
-  const storedResults = await storeCountyResults(db, enrichedResults, county);
+  // Store results without Google Places enrichment (mark as needing enrichment)
+  console.log(`Storing ${needsEnrichment.length} results (enrichment will happen in background)...`);
+  const storedResults = await storeCountyResults(db, needsEnrichment, county);
 
   // Record search
   await recordCountySearch(db, county, storedResults.length);
@@ -162,7 +161,7 @@ async function storeCountyResults(
         name, address, city, state, zip_code, county_name, county_geoid, location_type,
         latitude, longitude, type, phone, hours, rating, wait_time_minutes,
         eligibility_requirements, services_offered, languages_spoken, accessibility_notes,
-        notes, is_verified, verification_notes, source_url
+        notes, is_verified, verification_notes, source_url, needs_enrichment
       ) VALUES (
         ${result.name || ""},
         ${result.address || ""},
@@ -186,7 +185,8 @@ async function storeCountyResults(
         ${result.notes || null},
         ${result.is_verified || false},
         ${result.verification_notes || null},
-        ${result.source_url || null}
+        ${result.source_url || null},
+        ${true}
       )
       RETURNING id
     `;

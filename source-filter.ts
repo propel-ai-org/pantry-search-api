@@ -16,10 +16,41 @@ const BLOCKED_DOMAINS = [
   "yelp.com", // User reviews can be unreliable for verification
 ];
 
+// Name patterns that indicate non-food-assistance locations
+const BLOCKED_NAME_PATTERNS = [
+  // Schools (unless name explicitly mentions food pantry/bank)
+  /\b(elementary|middle|high|junior high|senior high)\s+school\b/i,
+  /\b(university|college)\b/i,
+  /\bschool\b(?!.*\b(food pantry|food bank|pantry)\b)/i,
+
+  // Commercial businesses
+  /\b(meal prep|restaurant|cafe|grocery|market|store)\b/i,
+
+  // Government offices (unless explicitly food distribution)
+  /\b(city hall|county office|dmv|department of)\b(?!.*\b(food|nutrition|wic)\b)/i,
+
+  // National umbrella organizations (not actual distribution sites)
+  /^feeding america$/i,
+  /^feedingamerica$/i,
+];
+
 export function filterBySource(
   resources: Partial<FoodResource>[]
 ): Partial<FoodResource>[] {
   return resources.filter((resource) => {
+    // Check name patterns first
+    if (resource.name) {
+      for (const pattern of BLOCKED_NAME_PATTERNS) {
+        if (pattern.test(resource.name)) {
+          console.log(
+            `Filtering out ${resource.name} - matches blocked pattern`
+          );
+          return false;
+        }
+      }
+    }
+
+    // Then check source URL
     if (!resource.source_url) {
       // Keep resources without source URLs
       return true;

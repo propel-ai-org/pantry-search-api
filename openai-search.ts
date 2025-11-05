@@ -61,6 +61,17 @@ I need you to:
 4. For each resource found (whether from search results OR from following directory links), verify it is currently operating (not permanently closed)
 5. Extract ONLY factual, verifiable information - do NOT make up or estimate any data
 
+IMPORTANT - DO NOT INCLUDE:
+- National umbrella organizations (e.g., "Feeding America" national headquarters, state associations, regional networks) - we need actual distribution sites only
+- Schools (elementary, middle, high schools, universities) unless they explicitly operate a food pantry as a separate service
+- Churches/places of worship unless they explicitly operate a food pantry (not just host food distribution events)
+- Commercial businesses (meal prep services, grocery stores, restaurants)
+- Government offices unless they are specifically food distribution sites
+- Community centers unless they explicitly operate a food pantry
+- Locations outside the search area (verify city/state matches the county being searched)
+
+ONLY include locations whose PRIMARY or MAJOR purpose is providing free food assistance to those in need, and which are physically located in the search area.
+
 For each verified resource, provide these fields ONLY if you have concrete evidence:
 - name: The official name (REQUIRED)
 - address: Street address (REQUIRED)
