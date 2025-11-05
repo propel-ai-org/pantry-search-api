@@ -2,8 +2,8 @@
 // ABOUTME: One-time script to migrate existing resources and search history
 
 import { Database as SQLiteDatabase } from "bun:sqlite";
-import { initDatabase } from "./database";
-import type { FoodResource, ZipSearch, CountySearch } from "./database";
+import { initDatabase } from "../src/database";
+import type { FoodResource, ZipSearch, CountySearch } from "../src/database";
 
 async function migrateData() {
   console.log("Starting data migration from SQLite to Postgres...");

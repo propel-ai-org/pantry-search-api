@@ -17,6 +17,13 @@ async function resetDatabase() {
   });
 
   try {
+    // First, delete all data
+    console.log("Deleting all data from tables...");
+    await sql`DELETE FROM resources`;
+    await sql`DELETE FROM zip_searches`;
+    await sql`DELETE FROM county_searches`;
+    console.log("✅ All data deleted\n");
+
     // Drop existing tables
     console.log("Dropping existing tables...");
     await sql`DROP TABLE IF EXISTS resources CASCADE`;
@@ -33,7 +40,21 @@ async function resetDatabase() {
     const db = await initDatabase();
     console.log("✅ Tables created with new schema\n");
 
-    console.log("Database reset complete!");
+    // Verify tables are empty
+    const resources = await db`SELECT COUNT(*) as count FROM resources`;
+    const counties = await db`SELECT COUNT(*) as count FROM county_searches`;
+    const zips = await db`SELECT COUNT(*) as count FROM zip_searches`;
+
+    console.log("Verification:");
+    console.log(`  Resources: ${resources[0].count}`);
+    console.log(`  County searches: ${counties[0].count}`);
+    console.log(`  Zip searches: ${zips[0].count}\n`);
+
+    if (resources[0].count !== "0" || counties[0].count !== "0" || zips[0].count !== "0") {
+      throw new Error("Database not empty after reset!");
+    }
+
+    console.log("✅ Database reset complete - all tables are empty!");
     await db.end();
   } catch (error) {
     console.error("Reset failed:", error);
