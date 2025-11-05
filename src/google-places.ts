@@ -165,7 +165,7 @@ export async function enrichWithGooglePlaces(
     const websiteUrl = detailsData.result.website || resource.source_url;
     let socialMediaLinks = {};
     if (websiteUrl) {
-      socialMediaLinks = await extractSocialMediaLinks(websiteUrl);
+      socialMediaLinks = await extractSocialMediaLinks(websiteUrl, resource.name);
     }
 
     return {

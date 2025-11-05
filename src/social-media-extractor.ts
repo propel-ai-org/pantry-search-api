@@ -9,7 +9,8 @@ interface SocialMediaLinks {
 }
 
 export async function extractSocialMediaLinks(
-  websiteUrl: string
+  websiteUrl: string,
+  resourceName?: string
 ): Promise<SocialMediaLinks> {
   if (!websiteUrl) {
     return {};
@@ -37,6 +38,13 @@ export async function extractSocialMediaLinks(
     }
 
     const html = await response.text();
+
+    // Validate that the website mentions the organization name (skip for PDFs)
+    const isPdf = websiteUrl.toLowerCase().endsWith('.pdf');
+    if (resourceName && !isPdf && !validateWebsiteMatchesName(html, resourceName)) {
+      console.log(`  ⚠️  Website doesn't mention "${resourceName}" - skipping social links`);
+      return {};
+    }
 
     // Extract social media URLs using regex
     const links: SocialMediaLinks = {};
@@ -94,4 +102,37 @@ function normalizeUrl(url: string, domain: string): string {
   url = url.replace('://www.', '://');
 
   return url;
+}
+
+function validateWebsiteMatchesName(html: string, resourceName: string): boolean {
+  // Normalize the HTML and resource name for comparison
+  const normalizedHtml = html.toLowerCase();
+  const normalizedName = resourceName.toLowerCase();
+
+  // Extract significant words from the resource name (ignore common words)
+  const commonWords = new Set([
+    'food', 'pantry', 'bank', 'the', 'a', 'an', 'and', 'or', 'of', 'at', 'in', 'for', 'to',
+    'community', 'center', 'program', 'services', 'ministry', 'mission', 'church',
+  ]);
+
+  const words = normalizedName
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length > 2 && !commonWords.has(word));
+
+  // If no significant words, allow through (can't validate)
+  if (words.length === 0) {
+    return true;
+  }
+
+  // Check if at least 50% of significant words appear on the page
+  let matchCount = 0;
+  for (const word of words) {
+    if (normalizedHtml.includes(word)) {
+      matchCount++;
+    }
+  }
+
+  const matchRatio = matchCount / words.length;
+  return matchRatio >= 0.5;
 }
