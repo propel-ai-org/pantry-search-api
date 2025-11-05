@@ -32,6 +32,11 @@ export interface FoodResource {
   url_twitter?: string;
   url_instagram?: string;
   url_youtube?: string;
+  wheelchair_accessible?: boolean;
+  has_curbside_pickup?: boolean;
+  has_delivery?: boolean;
+  has_takeout?: boolean;
+  editorial_summary?: string;
   created_at?: string;
   last_verified_at?: string;
   needs_enrichment?: boolean;
@@ -97,6 +102,11 @@ export async function initDatabase(): Promise<Database> {
       is_verified BOOLEAN DEFAULT false,
       verification_notes TEXT,
       source_url TEXT,
+      wheelchair_accessible BOOLEAN,
+      has_curbside_pickup BOOLEAN,
+      has_delivery BOOLEAN,
+      has_takeout BOOLEAN,
+      editorial_summary TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       last_verified_at TIMESTAMP,
       needs_enrichment BOOLEAN DEFAULT false,

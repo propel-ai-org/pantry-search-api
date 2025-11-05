@@ -45,6 +45,13 @@ interface PlaceDetailsResult {
       weekday_text: string[];
     };
     website?: string;
+    wheelchair_accessible_entrance?: boolean;
+    curbside_pickup?: boolean;
+    delivery?: boolean;
+    takeout?: boolean;
+    editorial_summary?: {
+      overview: string;
+    };
   };
   status: string;
 }
@@ -134,7 +141,7 @@ export async function enrichWithGooglePlaces(
     }
 
     // Get detailed information
-    const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${candidate.place_id}&fields=formatted_phone_number,opening_hours,website&key=${GOOGLE_PLACES_API_KEY}`;
+    const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${candidate.place_id}&fields=formatted_phone_number,opening_hours,website,wheelchair_accessible_entrance,curbside_pickup,delivery,takeout,editorial_summary&key=${GOOGLE_PLACES_API_KEY}`;
 
     const detailsResponse = await fetch(detailsUrl);
     const detailsData: PlaceDetailsResult = await detailsResponse.json();
@@ -188,8 +195,13 @@ export async function enrichWithGooglePlaces(
         url_twitter: socialMediaLinks.twitter || resource.url_twitter,
         url_instagram: socialMediaLinks.instagram || resource.url_instagram,
         url_youtube: socialMediaLinks.youtube || resource.url_youtube,
+        wheelchair_accessible: detailsData.result.wheelchair_accessible_entrance,
+        has_curbside_pickup: detailsData.result.curbside_pickup,
+        has_delivery: detailsData.result.delivery,
+        has_takeout: detailsData.result.takeout,
+        editorial_summary: detailsData.result.editorial_summary?.overview,
         is_verified: true,
-        verification_notes: `Verified via Google Places API (place_id: ${candidate.place_id})${candidate.user_ratings_total ? ` with ${candidate.user_ratings_total} reviews` : ""}`,
+        verification_notes: `Found via web search and verified via Google Places API${candidate.user_ratings_total ? ` (${candidate.user_ratings_total} reviews)` : ""}`,
         google_place_id: candidate.place_id,
       }
     };
