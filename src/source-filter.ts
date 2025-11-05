@@ -26,12 +26,21 @@ const BLOCKED_NAME_PATTERNS = [
   // Commercial businesses
   /\b(meal prep|restaurant|cafe|grocery|market|store)\b/i,
 
-  // Government offices (unless explicitly food distribution)
-  /\b(city hall|county office|dmv|department of)\b(?!.*\b(food|nutrition|wic)\b)/i,
+  // Government offices (unless explicitly food distribution/pantry/bank)
+  /\b(city hall|county office|dmv|department of)\b(?!.*\b(food|nutrition|wic|pantry|bank)\b)/i,
+  /\b(borough office|municipal office)\b(?!.*\b(food|pantry|bank|distribution)\b)/i,
 
   // National umbrella organizations (not actual distribution sites)
   /^feeding america$/i,
   /^feedingamerica$/i,
+];
+
+// URL patterns that indicate general government/organizational sites (not food-specific)
+const BLOCKED_URL_PATTERNS = [
+  // General government homepages without food-specific paths
+  /\.(gov|org)$/i, // Root domain without specific page
+  /\.(gov|org)\/?$/i,
+  /\/(about|contact|home|index)\/?$/i, // Generic pages
 ];
 
 export function filterBySource(
@@ -59,6 +68,7 @@ export function filterBySource(
     try {
       const url = new URL(resource.source_url);
       const hostname = url.hostname.toLowerCase();
+      const fullUrl = resource.source_url.toLowerCase();
 
       // Check if hostname matches any blocked domain
       for (const blocked of BLOCKED_DOMAINS) {
@@ -67,6 +77,20 @@ export function filterBySource(
             `Filtering out ${resource.name} from blocked source: ${hostname}`
           );
           return false;
+        }
+      }
+
+      // Check URL patterns - filter generic government/org pages unless they have food-specific paths
+      for (const pattern of BLOCKED_URL_PATTERNS) {
+        if (pattern.test(fullUrl)) {
+          // Allow if the URL contains food-related keywords in the path
+          const hasFoodPath = /\/(food|pantry|bank|nutrition|wic|snap|assistance|feeding)/i.test(url.pathname);
+          if (!hasFoodPath) {
+            console.log(
+              `Filtering out ${resource.name} - generic government/org URL without food-specific path: ${resource.source_url}`
+            );
+            return false;
+          }
         }
       }
 
