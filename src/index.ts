@@ -12,6 +12,7 @@ import {
   getUnprocessedCounties,
   getStateCountyStats,
 } from "./monitoring";
+import { generateStatusPage } from "./status-page";
 
 const db = await initDatabase();
 
@@ -130,10 +131,10 @@ const server = Bun.serve({
 
     if (url.pathname === "/status/counties" && req.method === "GET") {
       try {
-        const stats = await getCountyStats(db);
-        return new Response(JSON.stringify(stats), {
+        const html = await generateStatusPage(db);
+        return new Response(html, {
           status: 200,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       } catch (error) {
         console.error("County stats error:", error);
