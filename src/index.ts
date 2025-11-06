@@ -444,6 +444,51 @@ const server = Bun.serve({
       }
     }
 
+    if (url.pathname === "/update-url" && req.method === "POST") {
+      try {
+        const body = await req.json() as { resource_id?: number; source_url?: string };
+        const { resource_id, source_url } = body;
+
+        if (!resource_id || source_url === undefined) {
+          return new Response(
+            JSON.stringify({ error: "resource_id and source_url are required" }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        // Update the resource
+        await db`
+          UPDATE resources
+          SET source_url = ${source_url}
+          WHERE id = ${resource_id}
+        `;
+
+        return new Response(JSON.stringify({
+          success: true,
+          resource_id,
+          source_url,
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (error) {
+        console.error("Update URL error:", error);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to update URL",
+            details: error instanceof Error ? error.message : String(error),
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
     if (url.pathname === "/bulk-actions" && req.method === "POST") {
       try {
         const body = await req.json() as { action?: string; resource_ids?: number[] };

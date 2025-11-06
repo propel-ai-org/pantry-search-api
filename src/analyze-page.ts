@@ -656,6 +656,7 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
         buttons.push(\`<button class="btn btn-success" onclick="expandDirectory(\${resource.id})">Expand Directory</button>\`);
       }
 
+      buttons.push(\`<button class="btn btn-info" onclick="editUrl(\${resource.id}, '\${escapeHtml(resource.source_url || '')}')">Edit URL</button>\`);
       buttons.push(\`<button class="btn btn-warning" onclick="validateResource(\${resource.id})">AI Validate</button>\`);
       buttons.push(\`<button class="btn btn-info" onclick="reEnrichResource(\${resource.id})">Re-enrich</button>\`);
       buttons.push(\`<button class="btn btn-danger" onclick="deleteResource(\${resource.id})">Delete</button>\`);
@@ -765,6 +766,33 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
         showToast('Error', 'Failed to re-enrich: ' + error.message, 'error');
         btn.disabled = false;
         btn.textContent = originalText;
+      }
+    }
+
+    async function editUrl(resourceId, currentUrl) {
+      const newUrl = prompt('Enter the new source URL:', currentUrl);
+
+      if (newUrl === null || newUrl === currentUrl) {
+        return; // User cancelled or didn't change anything
+      }
+
+      try {
+        const response = await fetch('/update-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resource_id: resourceId, source_url: newUrl })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          showToast('Updated', 'Source URL updated successfully', 'success');
+          loadResults();
+        } else {
+          showToast('Error', result.error || 'Failed to update URL', 'error');
+        }
+      } catch (error) {
+        showToast('Error', 'Failed to update URL: ' + error.message, 'error');
       }
     }
 
