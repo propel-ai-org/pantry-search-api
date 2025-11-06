@@ -1,42 +1,14 @@
 // ABOUTME: Tests for parallel enrichment worker functionality
 // ABOUTME: Validates concurrent request processing and rate limiting
 
-import { test, expect, mock, beforeEach, afterEach } from "bun:test";
+import { test, expect } from "bun:test";
 import { startEnrichmentWorker } from "./enrichment-worker";
 import type { Database } from "bun:sql";
 import type { FoodResource } from "./database";
-
-// Mock the Google Places enrichment function
-const mockEnrichWithGooglePlaces = mock(() => Promise.resolve({
-  data: {
-    latitude: 37.7749,
-    longitude: -122.4194,
-    address: "123 Test St",
-    city: "San Francisco",
-    state: "CA",
-    zip_code: "94102",
-    phone: "555-1234",
-    hours: "Mon-Fri 9am-5pm",
-    rating: 4.5,
-    source_url: "https://example.com",
-    wheelchair_accessible: true,
-    has_curbside_pickup: false,
-    has_delivery: false,
-    has_takeout: false,
-    editorial_summary: "Great food pantry",
-    verification_notes: "Verified via Google Places",
-    google_place_id: "ChIJtest123",
-  },
-  failureReason: null,
-}));
-
-// Replace the actual import with our mock
-import * as googlePlacesModule from "./google-places";
-googlePlacesModule.enrichWithGooglePlaces = mockEnrichWithGooglePlaces as any;
+import type { EnrichmentResult } from "./google-places";
 
 test("should process up to 5 requests concurrently", async () => {
   const updateCalls: string[] = [];
-  let selectCallCount = 0;
   let activeRequests = 0;
   let maxConcurrentRequests = 0;
 
@@ -74,8 +46,8 @@ test("should process up to 5 requests concurrently", async () => {
     google_place_id: null,
   }));
 
-  // Track concurrent requests
-  mockEnrichWithGooglePlaces.mockImplementation(async (resource: FoodResource) => {
+  // Mock enrichment function that tracks concurrency
+  const mockEnrichFn = async (resource: FoodResource): Promise<EnrichmentResult> => {
     activeRequests++;
     maxConcurrentRequests = Math.max(maxConcurrentRequests, activeRequests);
 
@@ -104,14 +76,13 @@ test("should process up to 5 requests concurrently", async () => {
         verification_notes: "Verified via Google Places",
         google_place_id: "ChIJtest123",
       },
-      failureReason: null,
+      failureReason: undefined,
     };
-  });
+  };
 
   const mockDb = {
     async query(sql: string, params?: any[]) {
       if (sql.includes("SELECT * FROM resources WHERE needs_enrichment")) {
-        selectCallCount++;
         // Return available resources based on how many we've processed
         const remaining = mockResources.filter(r => r.needs_enrichment);
         return remaining.slice(0, params?.[0] || 5);
@@ -140,7 +111,7 @@ test("should process up to 5 requests concurrently", async () => {
     { end: async () => {} }
   ) as unknown as Database;
 
-  const stopWorker = startEnrichmentWorker(db);
+  const stopWorker = startEnrichmentWorker(db, mockEnrichFn);
 
   // Wait for enrichment to process some resources
   await new Promise(resolve => setTimeout(resolve, 1500));
@@ -159,7 +130,7 @@ test("should process up to 5 requests concurrently", async () => {
 });
 
 test("should handle enrichment failures gracefully", async () => {
-  let failureCallCount = 0;
+  let failureUpdateCalls = 0;
 
   const mockResource: FoodResource = {
     id: "fail-resource",
@@ -194,20 +165,20 @@ test("should handle enrichment failures gracefully", async () => {
     google_place_id: null,
   };
 
-  mockEnrichWithGooglePlaces.mockImplementation(async () => {
+  const mockEnrichFn = async (): Promise<EnrichmentResult> => {
     return {
       data: null,
       failureReason: "Not found",
     };
-  });
+  };
 
   const mockDb = {
-    async query(sql: string, params?: any[]) {
+    async query(sql: string) {
       if (sql.includes("SELECT * FROM resources WHERE needs_enrichment")) {
         return [mockResource];
       }
       if (sql.includes("UPDATE resources SET") && sql.includes("enrichment_failure_count")) {
-        failureCallCount++;
+        failureUpdateCalls++;
       }
       return [];
     },
@@ -223,7 +194,7 @@ test("should handle enrichment failures gracefully", async () => {
     { end: async () => {} }
   ) as unknown as Database;
 
-  const stopWorker = startEnrichmentWorker(db);
+  const stopWorker = startEnrichmentWorker(db, mockEnrichFn);
 
   // Wait for enrichment to attempt processing
   await new Promise(resolve => setTimeout(resolve, 500));
@@ -231,5 +202,5 @@ test("should handle enrichment failures gracefully", async () => {
   stopWorker();
 
   // Verify failure was recorded
-  expect(failureCallCount).toBeGreaterThan(0);
+  expect(failureUpdateCalls).toBeGreaterThan(0);
 });

@@ -67,7 +67,7 @@ async function processResource(
   }
 }
 
-async function enrichmentLoop(db: Database) {
+async function enrichmentLoop(db: Database, enrichFn: EnrichmentFunction) {
   while (!shouldStop) {
     try {
       // Only fetch new resources if we have capacity
@@ -90,7 +90,7 @@ async function enrichmentLoop(db: Database) {
           // Start enrichment for each resource (fire and forget)
           for (const resource of needsEnrichment) {
             activeEnrichments++;
-            processResource(db, resource).catch((error) => {
+            processResource(db, resource, enrichFn).catch((error) => {
               console.error(`[Enrichment] Error processing ${resource.name}:`, error);
               activeEnrichments--;
             });
@@ -109,9 +109,13 @@ async function enrichmentLoop(db: Database) {
   }
 }
 
-export function startEnrichmentWorker(db: Database): () => void {
+export function startEnrichmentWorker(
+  db: Database,
+  enrichFn?: EnrichmentFunction
+): () => void {
   shouldStop = false;
-  enrichmentLoop(db).catch((error) => {
+  const fn = enrichFn || enrichWithGooglePlaces;
+  enrichmentLoop(db, fn).catch((error) => {
     console.error("[Enrichment] Fatal error:", error);
   });
 

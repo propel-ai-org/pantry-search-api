@@ -56,7 +56,7 @@ interface PlaceDetailsResult {
   status: string;
 }
 
-interface EnrichmentResult {
+export interface EnrichmentResult {
   data: Partial<FoodResource> | null;
   failureReason?: string;
 }
