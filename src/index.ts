@@ -662,10 +662,11 @@ const server = Bun.serve({
         : undefined;
 
       try {
-        // Get all resources (or filtered by state)
+        // Get all resources (or filtered by state), excluding "mixed" type
         const resources = await db<FoodResource[]>`
           SELECT * FROM resources
-          ${state ? db`WHERE state = ${state.toUpperCase()}` : db``}
+          WHERE type IN ('pantry', 'bank')
+          ${state ? db`AND state = ${state.toUpperCase()}` : db``}
           ORDER BY created_at DESC
           ${limit ? db`LIMIT ${limit}` : db``}
         `;

@@ -652,10 +652,8 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
     function getActionButtons(resource) {
       const buttons = [];
 
-      if (resource.suspicion.category === 'directory_page') {
-        buttons.push(\`<button class="btn btn-success" onclick="expandDirectory(\${resource.id})">Expand Directory</button>\`);
-      }
-
+      // Always show expand directory option - user can manually identify directory pages
+      buttons.push(\`<button class="btn btn-success" onclick="expandDirectory(\${resource.id})" title="Extract multiple food banks from this page">Expand as Directory</button>\`);
       buttons.push(\`<button class="btn btn-info" onclick="editUrl(\${resource.id}, '\${escapeHtml(resource.source_url || '')}')">Edit URL</button>\`);
       buttons.push(\`<button class="btn btn-warning" onclick="validateResource(\${resource.id})">AI Validate</button>\`);
       buttons.push(\`<button class="btn btn-info" onclick="reEnrichResource(\${resource.id})">Re-enrich</button>\`);
