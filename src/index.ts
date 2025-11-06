@@ -235,6 +235,8 @@ const server = Bun.serve({
     if (url.pathname === "/analyze-resources" && req.method === "GET") {
       const state = url.searchParams.get("state") || undefined;
       const type = url.searchParams.get("type") as "pantry" | "bank" | "mixed" | undefined;
+      const exportableParam = url.searchParams.get("exportable");
+      const exportable = exportableParam === "true" ? true : exportableParam === "false" ? false : undefined;
       const minSuspicion = url.searchParams.get("min_suspicion")
         ? parseInt(url.searchParams.get("min_suspicion")!)
         : 50;
@@ -244,33 +246,19 @@ const server = Bun.serve({
         : 100;
 
       try {
-        // Get resources with optional filters
-        let resources: FoodResource[];
+        // Build query conditions
+        const conditions = [];
+        if (state) conditions.push(`state = '${state.toUpperCase()}'`);
+        if (type) conditions.push(`type = '${type}'`);
+        if (exportable !== undefined) conditions.push(`exportable = ${exportable}`);
 
-        if (state && type) {
-          resources = await db<FoodResource[]>`
-            SELECT * FROM resources
-            WHERE state = ${state.toUpperCase()} AND type = ${type}
-            ORDER BY created_at DESC
-          `;
-        } else if (state) {
-          resources = await db<FoodResource[]>`
-            SELECT * FROM resources
-            WHERE state = ${state.toUpperCase()}
-            ORDER BY created_at DESC
-          `;
-        } else if (type) {
-          resources = await db<FoodResource[]>`
-            SELECT * FROM resources
-            WHERE type = ${type}
-            ORDER BY created_at DESC
-          `;
-        } else {
-          resources = await db<FoodResource[]>`
-            SELECT * FROM resources
-            ORDER BY created_at DESC
-          `;
-        }
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        const resources = await db<FoodResource[]>`
+          SELECT * FROM resources
+          ${db.unsafe(whereClause)}
+          ORDER BY created_at DESC
+        `;
 
         // Analyze for false positives
         const analyzed = analyzeResources(resources);
@@ -434,6 +422,50 @@ const server = Bun.serve({
         return new Response(
           JSON.stringify({
             error: "Failed to expand directory",
+            details: error instanceof Error ? error.message : String(error),
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
+    if (url.pathname === "/mark-exportable" && req.method === "POST") {
+      try {
+        const body = await req.json() as { resource_id?: number };
+        const { resource_id } = body;
+
+        if (!resource_id) {
+          return new Response(
+            JSON.stringify({ error: "resource_id is required" }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        // Mark resource as exportable
+        await db`
+          UPDATE resources
+          SET exportable = true
+          WHERE id = ${resource_id}
+        `;
+
+        return new Response(JSON.stringify({
+          success: true,
+          resource_id,
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (error) {
+        console.error("Mark exportable error:", error);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to mark as exportable",
             details: error instanceof Error ? error.message : String(error),
           }),
           {
@@ -662,10 +694,10 @@ const server = Bun.serve({
         : undefined;
 
       try {
-        // Get all resources (or filtered by state), excluding "mixed" type
+        // Get all exportable resources (or filtered by state)
         const resources = await db<FoodResource[]>`
           SELECT * FROM resources
-          WHERE type IN ('pantry', 'bank')
+          WHERE exportable = true
           ${state ? db`AND state = ${state.toUpperCase()}` : db``}
           ORDER BY created_at DESC
           ${limit ? db`LIMIT ${limit}` : db``}

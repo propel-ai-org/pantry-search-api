@@ -470,6 +470,15 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
       </div>
 
       <div class="filter-group">
+        <label>Exportable Status</label>
+        <select id="exportableFilter">
+          <option value="">All</option>
+          <option value="true">Exportable</option>
+          <option value="false" selected>Not Exportable</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
         <label>Limit</label>
         <input type="number" id="limitFilter" value="100" min="1" max="500">
       </div>
@@ -511,6 +520,7 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
       document.getElementById('typeFilter').value = '';
       document.getElementById('categoryFilter').value = '';
       document.getElementById('minSuspicionFilter').value = '50';
+      document.getElementById('exportableFilter').value = 'false';
       document.getElementById('limitFilter').value = '100';
     }
 
@@ -538,12 +548,14 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
         const type = document.getElementById('typeFilter').value;
         const category = document.getElementById('categoryFilter').value;
         const minSuspicion = document.getElementById('minSuspicionFilter').value;
+        const exportable = document.getElementById('exportableFilter').value;
         const limit = document.getElementById('limitFilter').value;
 
         if (state) params.append('state', state);
         if (type) params.append('type', type);
         if (category) params.append('category', category);
         if (minSuspicion) params.append('min_suspicion', minSuspicion);
+        if (exportable) params.append('exportable', exportable);
         if (limit) params.append('limit', limit);
 
         const response = await fetch('/analyze-resources?' + params.toString());
@@ -651,6 +663,11 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
 
     function getActionButtons(resource) {
       const buttons = [];
+
+      // Show "Mark as Exportable" if not already exportable
+      if (!resource.exportable) {
+        buttons.push(\`<button class="btn btn-success" onclick="markExportable(\${resource.id})" title="Mark as ready for export">✓ Mark Exportable</button>\`);
+      }
 
       // Always show expand directory option - user can manually identify directory pages
       buttons.push(\`<button class="btn btn-success" onclick="expandDirectory(\${resource.id})" title="Extract multiple food banks from this page">Expand as Directory</button>\`);
@@ -764,6 +781,27 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
         showToast('Error', 'Failed to re-enrich: ' + error.message, 'error');
         btn.disabled = false;
         btn.textContent = originalText;
+      }
+    }
+
+    async function markExportable(resourceId) {
+      try {
+        const response = await fetch('/mark-exportable', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resource_id: resourceId })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          showToast('Success', 'Resource marked as exportable', 'success');
+          loadResults();
+        } else {
+          showToast('Error', result.error || 'Failed to mark as exportable', 'error');
+        }
+      } catch (error) {
+        showToast('Error', 'Failed to mark as exportable: ' + error.message, 'error');
       }
     }
 

@@ -44,6 +44,7 @@ export interface FoodResource {
   last_enrichment_attempt?: string;
   enrichment_failure_count?: number;
   enrichment_failure_reason?: string;
+  exportable?: boolean;
 }
 
 export interface ZipSearch {
@@ -113,8 +114,15 @@ export async function initDatabase(): Promise<Database> {
       google_place_id TEXT,
       last_enrichment_attempt TIMESTAMP,
       enrichment_failure_count INTEGER DEFAULT 0,
-      enrichment_failure_reason TEXT
+      enrichment_failure_reason TEXT,
+      exportable BOOLEAN DEFAULT false
     )
+  `;
+
+  // Add exportable column if it doesn't exist (migration)
+  await sql`
+    ALTER TABLE resources
+    ADD COLUMN IF NOT EXISTS exportable BOOLEAN DEFAULT false
   `;
 
   // Create zip searches tracking table
