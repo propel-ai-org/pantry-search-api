@@ -1,7 +1,7 @@
 // ABOUTME: Main API server for food pantry/bank search
 // ABOUTME: Provides endpoints to search and runs background enrichment
 
-import { initDatabase } from "./database";
+import { initDatabase, type FoodResource } from "./database";
 import { searchFoodResources } from "./search";
 import { searchFoodResourcesByCounty } from "./county-search";
 import { findCounty } from "./counties";
@@ -13,6 +13,11 @@ import {
   getStateCountyStats,
 } from "./monitoring";
 import { generateStatusPage } from "./status-page";
+import { analyzeResources, filterBySuspicion, groupByCategory } from "./false-positive-detector";
+import { validateBatch } from "./ai-validator";
+import { enrichWithGooglePlaces } from "./google-places";
+import { generateAnalyzePage } from "./analyze-page";
+import { expandDirectory } from "./directory-expander";
 
 const db = await initDatabase();
 
@@ -217,6 +222,384 @@ const server = Bun.serve({
         return new Response(
           JSON.stringify({
             error: "Failed to get unprocessed counties",
+            details: error instanceof Error ? error.message : String(error),
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
+    if (url.pathname === "/analyze-resources" && req.method === "GET") {
+      const state = url.searchParams.get("state") || undefined;
+      const type = url.searchParams.get("type") as "pantry" | "bank" | "mixed" | undefined;
+      const minSuspicion = url.searchParams.get("min_suspicion")
+        ? parseInt(url.searchParams.get("min_suspicion")!)
+        : 50;
+      const category = url.searchParams.get("category") || undefined;
+      const limit = url.searchParams.get("limit")
+        ? parseInt(url.searchParams.get("limit")!)
+        : 100;
+
+      try {
+        // Get resources with optional filters
+        let resources: FoodResource[];
+
+        if (state && type) {
+          resources = await db<FoodResource[]>`
+            SELECT * FROM resources
+            WHERE state = ${state.toUpperCase()} AND type = ${type}
+            ORDER BY created_at DESC
+          `;
+        } else if (state) {
+          resources = await db<FoodResource[]>`
+            SELECT * FROM resources
+            WHERE state = ${state.toUpperCase()}
+            ORDER BY created_at DESC
+          `;
+        } else if (type) {
+          resources = await db<FoodResource[]>`
+            SELECT * FROM resources
+            WHERE type = ${type}
+            ORDER BY created_at DESC
+          `;
+        } else {
+          resources = await db<FoodResource[]>`
+            SELECT * FROM resources
+            ORDER BY created_at DESC
+          `;
+        }
+
+        // Analyze for false positives
+        const analyzed = analyzeResources(resources);
+
+        // Filter by suspicion score
+        let filtered = filterBySuspicion(analyzed, minSuspicion);
+
+        // Filter by category if specified
+        if (category) {
+          filtered = filtered.filter(r => r.suspicion.category === category);
+        }
+
+        // Limit results
+        filtered = filtered.slice(0, limit);
+
+        // Group by category for summary
+        const grouped = groupByCategory(filtered);
+        const summary = Object.entries(grouped).map(([cat, items]) => ({
+          category: cat,
+          count: items.length,
+          avg_suspicion: items.reduce((sum, item) => sum + item.suspicion.score, 0) / items.length,
+        }));
+
+        return new Response(JSON.stringify({
+          summary,
+          total_analyzed: resources.length,
+          suspicious_count: filtered.length,
+          resources: filtered,
+        }, null, 2), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (error) {
+        console.error("Analysis error:", error);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to analyze resources",
+            details: error instanceof Error ? error.message : String(error),
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
+    if (url.pathname === "/analyze-ui" && req.method === "GET") {
+      try {
+        const html = await generateAnalyzePage(db);
+        return new Response(html, {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      } catch (error) {
+        console.error("Analyze UI error:", error);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to generate analyze UI",
+            details: error instanceof Error ? error.message : String(error),
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
+    if (url.pathname === "/expand-directory" && req.method === "POST") {
+      try {
+        const body = await req.json() as { resource_ids?: number[] };
+        const resourceIds = body.resource_ids;
+
+        if (!resourceIds || !Array.isArray(resourceIds)) {
+          return new Response(
+            JSON.stringify({ error: "resource_ids array is required" }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        // Get resources to expand
+        const resources = await db<FoodResource[]>`
+          SELECT * FROM resources
+          WHERE id = ANY(${resourceIds})
+        `;
+
+        const expanded = [];
+        const failed = [];
+        const allNewResources: Partial<FoodResource>[] = [];
+
+        for (const resource of resources) {
+          const result = await expandDirectory(resource);
+
+          if (result.success && result.new_resources.length > 0) {
+            // Store new resources
+            for (const newResource of result.new_resources) {
+              const inserted = await db<{ id: number }[]>`
+                INSERT INTO resources (
+                  name, address, city, state, zip_code, county_name, county_geoid, location_type,
+                  latitude, longitude, type, phone, hours, notes, is_verified, verification_notes,
+                  source_url, needs_enrichment
+                ) VALUES (
+                  ${newResource.name || ""},
+                  ${newResource.address || ""},
+                  ${newResource.city || null},
+                  ${newResource.state || null},
+                  ${newResource.zip_code || null},
+                  ${newResource.county_name || null},
+                  ${newResource.county_geoid || null},
+                  ${newResource.location_type || "county"},
+                  ${newResource.latitude || null},
+                  ${newResource.longitude || null},
+                  ${newResource.type || "mixed"},
+                  ${newResource.phone || null},
+                  ${newResource.hours || null},
+                  ${newResource.notes || null},
+                  ${newResource.is_verified || false},
+                  ${newResource.verification_notes || null},
+                  ${newResource.source_url || null},
+                  ${true}
+                )
+                RETURNING id
+              `;
+
+              if (inserted.length > 0) {
+                allNewResources.push({ ...newResource, id: inserted[0].id });
+              }
+            }
+
+            // Delete original directory entry
+            await db`DELETE FROM resources WHERE id = ${resource.id}`;
+
+            expanded.push({
+              id: resource.id,
+              name: resource.name,
+              count: result.new_resources.length,
+            });
+          } else {
+            failed.push({
+              id: resource.id,
+              name: resource.name,
+              reason: result.error || "Unknown error",
+            });
+          }
+        }
+
+        return new Response(JSON.stringify({
+          expanded_count: expanded.length,
+          new_resources: allNewResources,
+          failed: failed,
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (error) {
+        console.error("Expand directory error:", error);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to expand directory",
+            details: error instanceof Error ? error.message : String(error),
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
+    if (url.pathname === "/bulk-actions" && req.method === "POST") {
+      try {
+        const body = await req.json() as { action?: string; resource_ids?: number[] };
+        const action = body.action as "delete" | "validate" | "re-enrich";
+        const resourceIds = body.resource_ids as number[];
+
+        if (!action || !resourceIds || !Array.isArray(resourceIds)) {
+          return new Response(
+            JSON.stringify({ error: "action and resource_ids are required" }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        if (action === "delete") {
+          // Delete resources
+          const result = await db`
+            DELETE FROM resources
+            WHERE id = ANY(${resourceIds})
+            RETURNING id
+          `;
+
+          return new Response(JSON.stringify({
+            action: "delete",
+            deleted_count: result.length,
+            deleted_ids: result.map(r => r.id),
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (action === "validate") {
+          // Get resources to validate
+          const resources = await db<FoodResource[]>`
+            SELECT * FROM resources
+            WHERE id = ANY(${resourceIds})
+          `;
+
+          // Run AI validation
+          const validations = await validateBatch(resources, (completed, total) => {
+            console.log(`AI validation progress: ${completed}/${total}`);
+          });
+
+          // Update resources with validation results
+          const updates = [];
+          for (const [id, validation] of validations.entries()) {
+            updates.push({
+              id,
+              validation,
+            });
+
+            // Update verification status based on validation
+            const notes = `AI validation: ${validation.reasoning} (confidence: ${validation.confidence}%)`;
+            await db`
+              UPDATE resources SET
+                is_verified = ${validation.is_food_resource},
+                verification_notes = ${notes}
+              WHERE id = ${id}
+            `;
+          }
+
+          return new Response(JSON.stringify({
+            action: "validate",
+            validated_count: updates.length,
+            results: updates,
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (action === "re-enrich") {
+          // Get resources to re-enrich
+          const resources = await db<FoodResource[]>`
+            SELECT * FROM resources
+            WHERE id = ANY(${resourceIds})
+          `;
+
+          const enriched = [];
+          const failed = [];
+
+          for (const resource of resources) {
+            try {
+              const enrichmentResult = await enrichWithGooglePlaces(resource);
+
+              if (enrichmentResult.data) {
+                const enrichedData = enrichmentResult.data;
+                // Update resource with enriched data
+                await db`
+                  UPDATE resources SET
+                    phone = ${enrichedData.phone || resource.phone},
+                    hours = ${enrichedData.hours || resource.hours},
+                    rating = ${enrichedData.rating || resource.rating},
+                    latitude = ${enrichedData.latitude || resource.latitude},
+                    longitude = ${enrichedData.longitude || resource.longitude},
+                    google_place_id = ${enrichedData.google_place_id || resource.google_place_id},
+                    editorial_summary = ${enrichedData.editorial_summary || resource.editorial_summary},
+                    wheelchair_accessible = ${enrichedData.wheelchair_accessible ?? resource.wheelchair_accessible},
+                    has_curbside_pickup = ${enrichedData.has_curbside_pickup ?? resource.has_curbside_pickup},
+                    has_delivery = ${enrichedData.has_delivery ?? resource.has_delivery},
+                    has_takeout = ${enrichedData.has_takeout ?? resource.has_takeout},
+                    url_facebook = ${enrichedData.url_facebook || resource.url_facebook},
+                    url_twitter = ${enrichedData.url_twitter || resource.url_twitter},
+                    url_instagram = ${enrichedData.url_instagram || resource.url_instagram},
+                    url_youtube = ${enrichedData.url_youtube || resource.url_youtube},
+                    needs_enrichment = false,
+                    enrichment_failure_count = 0,
+                    enrichment_failure_reason = null,
+                    last_enrichment_attempt = NOW()
+                  WHERE id = ${resource.id}
+                `;
+                enriched.push(resource.id);
+              } else {
+                failed.push({
+                  id: resource.id,
+                  reason: enrichmentResult.failureReason || "No enrichment data found"
+                });
+              }
+            } catch (error) {
+              failed.push({
+                id: resource.id,
+                reason: error instanceof Error ? error.message : String(error)
+              });
+            }
+
+            // Rate limiting
+            await new Promise((resolve) => setTimeout(resolve, 200));
+          }
+
+          return new Response(JSON.stringify({
+            action: "re-enrich",
+            enriched_count: enriched.length,
+            enriched_ids: enriched,
+            failed_count: failed.length,
+            failed: failed,
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response(
+          JSON.stringify({ error: "Invalid action. Must be delete, validate, or re-enrich" }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      } catch (error) {
+        console.error("Bulk action error:", error);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to perform bulk action",
             details: error instanceof Error ? error.message : String(error),
           }),
           {

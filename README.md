@@ -171,6 +171,194 @@ Returns a list of all counties that haven't been processed yet.
 curl "http://localhost:3000/status/unprocessed"
 ```
 
+### Analyze UI (Interactive Web Interface)
+
+```
+GET /analyze-ui
+```
+
+**Interactive web interface** for managing false positives. Provides a visual UI to:
+- Filter resources by state, type, category, and suspicion score
+- View suspicious resources in a table with detailed reasons
+- Take actions directly from the browser:
+  - **Expand Directory** - Extracts individual food banks from directory pages
+  - **AI Validate** - Uses OpenAI to verify if location is actually a food resource
+  - **Re-enrich** - Fetches fresh data from Google Places API
+  - **Delete** - Removes false positive entries
+
+**Access:**
+```
+http://localhost:3000/analyze-ui
+```
+
+**Features:**
+- Real-time filtering and analysis
+- Summary statistics by category
+- One-click actions with progress indicators
+- Toast notifications for action results
+- Automatic table refresh after actions
+
+### Expand Directory
+
+```
+POST /expand-directory
+```
+
+Expands directory/listing pages into individual food bank entries. When the system mistakenly stores a directory page as a single resource, this endpoint fetches the directory, extracts all listed food banks, stores them as separate resources, and deletes the original directory entry.
+
+**Request Body:**
+```json
+{
+  "resource_ids": [76925]
+}
+```
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/expand-directory \
+  -H "Content-Type: application/json" \
+  -d '{"resource_ids": [76925]}'
+```
+
+**Response:**
+```json
+{
+  "expanded_count": 1,
+  "new_resources": [
+    {
+      "id": 78001,
+      "name": "North Texas Food Bank",
+      "address": "3677 Mapleshade Ln",
+      "city": "Dallas",
+      "state": "TX"
+    },
+    {
+      "id": 78002,
+      "name": "Tarrant Area Food Bank",
+      "address": "2600 Cullen St",
+      "city": "Fort Worth",
+      "state": "TX"
+    }
+  ],
+  "failed": []
+}
+```
+
+### Analyze Resources for False Positives (API)
+
+```
+GET /analyze-resources
+```
+
+Analyzes resources to identify likely false positives (non-food-assistance locations).
+
+**Parameters:**
+- `state` (optional): Filter by two-letter state code (e.g., "CA")
+- `type` (optional): Filter by type ("pantry", "bank", or "mixed")
+- `min_suspicion` (optional): Minimum suspicion score (0-100, default: 50)
+- `category` (optional): Filter by false positive category ("financial_bank", "wrong_bank_type", "government_office", "community_center", "school", "missing_verification", "generic_listing", "unclear")
+- `limit` (optional): Maximum results to return (default: 100)
+
+**Example:**
+```bash
+# Find suspicious "bank" type resources
+curl "http://localhost:3000/analyze-resources?type=bank&min_suspicion=60"
+
+# Find all suspicious resources in California
+curl "http://localhost:3000/analyze-resources?state=CA&min_suspicion=50"
+
+# Find likely financial institutions
+curl "http://localhost:3000/analyze-resources?category=financial_bank"
+```
+
+**Response:**
+```json
+{
+  "summary": [
+    {
+      "category": "financial_bank",
+      "count": 15,
+      "avg_suspicion": 75.3
+    }
+  ],
+  "total_analyzed": 1234,
+  "suspicious_count": 45,
+  "resources": [
+    {
+      "id": 123,
+      "name": "Community Bank",
+      "address": "123 Main St",
+      "type": "bank",
+      "suspicion": {
+        "score": 80,
+        "reasons": ["Contains financial institution keywords"],
+        "category": "financial_bank"
+      }
+    }
+  ]
+}
+```
+
+### Bulk Actions
+
+```
+POST /bulk-actions
+```
+
+Perform bulk operations on resources (delete, AI validation, or re-enrichment).
+
+**Request Body:**
+```json
+{
+  "action": "delete" | "validate" | "re-enrich",
+  "resource_ids": [123, 456, 789]
+}
+```
+
+**Actions:**
+
+1. **delete**: Remove resources from database
+   ```bash
+   curl -X POST http://localhost:3000/bulk-actions \
+     -H "Content-Type: application/json" \
+     -d '{"action": "delete", "resource_ids": [123, 456]}'
+   ```
+
+2. **validate**: Use AI to check if resources are actually food assistance locations
+   ```bash
+   curl -X POST http://localhost:3000/bulk-actions \
+     -H "Content-Type: application/json" \
+     -d '{"action": "validate", "resource_ids": [123, 456]}'
+   ```
+
+   Uses GPT-4o-mini to analyze each resource and determine if it's a legitimate food assistance location.
+
+3. **re-enrich**: Fetch fresh data from Google Places API
+   ```bash
+   curl -X POST http://localhost:3000/bulk-actions \
+     -H "Content-Type: application/json" \
+     -d '{"action": "re-enrich", "resource_ids": [123, 456]}'
+   ```
+
+**Response:**
+```json
+{
+  "action": "validate",
+  "validated_count": 2,
+  "results": [
+    {
+      "id": 123,
+      "validation": {
+        "is_food_resource": false,
+        "confidence": 95,
+        "reasoning": "This is a financial bank, not a food bank",
+        "recommended_action": "delete"
+      }
+    }
+  ]
+}
+```
+
 ### Health Check
 
 ```

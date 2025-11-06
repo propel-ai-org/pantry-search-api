@@ -3,6 +3,12 @@
   "module": "src/index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "start": "bun src/index.ts",
+    "script:remove-permanently-closed": "bun scripts/remove-permanently-closed.ts",
+    "script:remove-law-enforcement": "bun scripts/remove-law-enforcement.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
