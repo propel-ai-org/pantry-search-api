@@ -97,7 +97,9 @@ IMPORTANT:
 - Do NOT include ratings or wait times unless you find them explicitly stated
 - Do NOT estimate or infer data
 
-Return ONLY valid JSON in this exact format:
+CRITICAL: You MUST return ONLY a single JSON object. Do NOT wrap it in markdown code blocks. Do NOT add any explanatory text before or after the JSON. Your entire response must be parseable as JSON.
+
+Return this exact format:
 {
   "resources": [
     {
@@ -132,17 +134,30 @@ Return ONLY valid JSON in this exact format:
 
     console.log("OpenAI response preview:", outputText.substring(0, 500));
 
-    // Parse JSON from response - handle truncated responses
+    // Parse JSON from response - handle markdown code blocks and truncated responses
     let jsonText = outputText;
 
-    // Try to find JSON block
-    const jsonMatch = outputText.match(/\{[\s\S]*"resources"[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error("Full response:", outputText);
-      throw new Error("No JSON found in OpenAI response");
-    }
+    // Step 1: Try to extract JSON from markdown code blocks (```json ... ```)
+    const markdownMatch = outputText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (markdownMatch) {
+      jsonText = markdownMatch[1];
+      console.log("Extracted JSON from markdown code block");
+    } else {
+      // Step 2: Try to find raw JSON block
+      const jsonMatch = outputText.match(/\{[\s\S]*"resources"[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error("Full response:", outputText);
+        console.error("\nCould not find JSON in OpenAI response. Logging to failed-responses.log");
 
-    jsonText = jsonMatch[0];
+        // Log the failed response for manual review
+        const fs = await import("fs");
+        const logEntry = `\n${"=".repeat(80)}\nTimestamp: ${new Date().toISOString()}\nLocation: ${location}\n${"-".repeat(80)}\n${outputText}\n`;
+        fs.appendFileSync("failed-responses.log", logEntry);
+
+        throw new Error("No JSON found in OpenAI response");
+      }
+      jsonText = jsonMatch[0];
+    }
 
     // Try to fix truncated JSON arrays by adding closing brackets
     let result: OpenAISearchResult;

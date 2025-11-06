@@ -19,8 +19,8 @@ const BLOCKED_DOMAINS = [
 // Name patterns that indicate non-food-assistance locations
 const BLOCKED_NAME_PATTERNS = [
   // Schools (unless name explicitly mentions food pantry/bank)
-  /\b(elementary|middle|high|junior high|senior high)\s+school\b/i,
-  /\b(university|college)\b/i,
+  /\b(elementary|middle|high|junior high|senior high)\s+school\b(?!.*\b(food pantry|food bank|pantry)\b)/i,
+  /\b(university|college)\b(?!.*\b(food pantry|food bank|pantry)\b)/i,
   /\bschool\b(?!.*\b(food pantry|food bank|pantry)\b)/i,
 
   // Commercial businesses
@@ -31,6 +31,7 @@ const BLOCKED_NAME_PATTERNS = [
   /\b(borough office|municipal office)\b(?!.*\b(food|pantry|bank|distribution)\b)/i,
   /\b(procurement|public works|administration)\b(?!.*\b(food|pantry|bank|nutrition|wic|meal|feeding)\b)/i,
   /\b(senior citizen center|senior services)\b(?!.*\b(food|pantry|bank|meal|nutrition)\b)/i,
+  /\b(emergency management|housing authority)\b(?!.*\b(food|pantry|bank|nutrition|wic|meal|feeding|distribution)\b)/i,
 
   // National umbrella organizations (not actual distribution sites)
   /^feeding america$/i,
