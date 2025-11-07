@@ -409,6 +409,157 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
       }
     }
 
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 2000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.5);
+      animation: fadeIn 0.2s ease;
+    }
+
+    .modal.show {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-content {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      max-width: 600px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+      animation: slideUp 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes slideUp {
+      from {
+        transform: translateY(50px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .modal-header {
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid #ecf0f1;
+    }
+
+    .modal-header h2 {
+      margin: 0;
+      color: #2c3e50;
+      font-size: 24px;
+    }
+
+    .modal-body {
+      margin-bottom: 20px;
+    }
+
+    .validation-progress {
+      margin: 20px 0;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 10px;
+      background: #ecf0f1;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      transition: width 0.3s ease;
+    }
+
+    .progress-text {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #7f8c8d;
+      text-align: center;
+    }
+
+    .validation-results {
+      max-height: 400px;
+      overflow-y: auto;
+      margin-top: 20px;
+    }
+
+    .validation-item {
+      padding: 12px;
+      margin-bottom: 8px;
+      border-radius: 6px;
+      border-left: 4px solid #ecf0f1;
+    }
+
+    .validation-item.valid {
+      background: #d4edda;
+      border-left-color: #28a745;
+    }
+
+    .validation-item.invalid {
+      background: #f8d7da;
+      border-left-color: #dc3545;
+    }
+
+    .validation-item.pending {
+      background: #fff3cd;
+      border-left-color: #ffc107;
+    }
+
+    .validation-item-name {
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #2c3e50;
+    }
+
+    .validation-item-reason {
+      font-size: 12px;
+      color: #6c757d;
+    }
+
+    .bulk-actions-bar {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      display: none;
+      align-items: center;
+      gap: 15px;
+    }
+
+    .bulk-actions-bar.show {
+      display: flex;
+    }
+
+    .checkbox-cell {
+      width: 40px;
+      text-align: center;
+    }
+
+    .checkbox-cell input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+
     .toast-title {
       font-weight: bold;
       margin-bottom: 4px;
@@ -490,10 +641,37 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
     </div>
 
     <div id="summarySection"></div>
+
+    <div id="bulkActionsBar" class="bulk-actions-bar">
+      <span id="selectedCount" style="font-weight: 600; color: #2c3e50;">0 selected</span>
+      <button class="btn btn-info" onclick="validateSelected()">Validate Selected</button>
+      <button class="btn btn-secondary" onclick="clearSelection()">Clear Selection</button>
+    </div>
+
     <div id="resultsSection">
       <div class="no-results">
         <h3>No Analysis Yet</h3>
         <p>Configure filters above and click "Analyze" to scan for false positives.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="validationModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>URL Validation</h2>
+      </div>
+      <div class="modal-body">
+        <div class="validation-progress">
+          <div class="progress-bar">
+            <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+          </div>
+          <div id="progressText" class="progress-text">Preparing validation...</div>
+        </div>
+        <div id="validationResults" class="validation-results"></div>
+      </div>
+      <div style="text-align: right;">
+        <button class="btn btn-secondary" onclick="closeValidationModal()">Close</button>
       </div>
     </div>
   </div>
@@ -587,6 +765,9 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
             <table class="results-table">
               <thead>
                 <tr>
+                  <th class="checkbox-cell">
+                    <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)">
+                  </th>
                   <th>Resource</th>
                   <th>Type</th>
                   <th>Category</th>
@@ -598,6 +779,9 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
               <tbody>
                 \${data.resources.map(resource => \`
                   <tr>
+                    <td class="checkbox-cell">
+                      <input type="checkbox" class="resource-checkbox" value="\${resource.id}" onchange="updateSelection()">
+                    </td>
                     <td>
                       <div class="resource-name">\${escapeHtml(resource.name)}</div>
                       <div class="resource-address">\${escapeHtml(resource.address || '')}</div>
@@ -859,6 +1043,120 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
       } catch (error) {
         showToast('Error', 'Failed to delete: ' + error.message, 'error');
         btn.disabled = false;
+      }
+    }
+
+    function updateSelection() {
+      const checkboxes = document.querySelectorAll('.resource-checkbox');
+      const checked = Array.from(checkboxes).filter(cb => cb.checked);
+      const count = checked.length;
+
+      document.getElementById('selectedCount').textContent = \`\${count} selected\`;
+
+      const bulkBar = document.getElementById('bulkActionsBar');
+      if (count > 0) {
+        bulkBar.classList.add('show');
+      } else {
+        bulkBar.classList.remove('show');
+      }
+
+      const selectAll = document.getElementById('selectAll');
+      if (selectAll) {
+        selectAll.checked = count === checkboxes.length && count > 0;
+      }
+    }
+
+    function toggleSelectAll(checked) {
+      const checkboxes = document.querySelectorAll('.resource-checkbox');
+      checkboxes.forEach(cb => cb.checked = checked);
+      updateSelection();
+    }
+
+    function clearSelection() {
+      const checkboxes = document.querySelectorAll('.resource-checkbox');
+      checkboxes.forEach(cb => cb.checked = false);
+      updateSelection();
+    }
+
+    function getSelectedIds() {
+      const checkboxes = document.querySelectorAll('.resource-checkbox:checked');
+      return Array.from(checkboxes).map(cb => parseInt(cb.value));
+    }
+
+    function closeValidationModal() {
+      document.getElementById('validationModal').classList.remove('show');
+    }
+
+    async function validateSelected() {
+      const selectedIds = getSelectedIds();
+
+      if (selectedIds.length === 0) {
+        showToast('No Selection', 'Please select resources to validate', 'error');
+        return;
+      }
+
+      const modal = document.getElementById('validationModal');
+      const progressFill = document.getElementById('progressFill');
+      const progressText = document.getElementById('progressText');
+      const resultsDiv = document.getElementById('validationResults');
+
+      modal.classList.add('show');
+      progressFill.style.width = '0%';
+      progressText.textContent = \`Validating \${selectedIds.length} resource(s)...\`;
+      resultsDiv.innerHTML = '';
+
+      try {
+        const response = await fetch('/bulk-validate-urls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resource_ids: selectedIds })
+        });
+
+        if (!response.ok) {
+          throw new Error('Validation request failed');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+        }
+
+        const result = JSON.parse(buffer);
+
+        progressFill.style.width = '100%';
+        progressText.textContent = \`Validation complete: \${result.valid_count} valid, \${result.invalid_count} invalid\`;
+
+        resultsDiv.innerHTML = result.results.map(item => \`
+          <div class="validation-item \${item.valid ? 'valid' : 'invalid'}">
+            <div class="validation-item-name">\${escapeHtml(item.name)}</div>
+            <div class="validation-item-reason">\${escapeHtml(item.reason)}</div>
+          </div>
+        \`).join('');
+
+        if (result.invalid_count > 0) {
+          showToast('Validation Complete', \`Marked \${result.invalid_count} resource(s) as unexportable\`, 'info');
+        } else {
+          showToast('Validation Complete', 'All resources passed validation', 'success');
+        }
+
+        clearSelection();
+
+      } catch (error) {
+        progressText.textContent = 'Validation failed';
+        resultsDiv.innerHTML = \`
+          <div class="validation-item invalid">
+            <div class="validation-item-name">Error</div>
+            <div class="validation-item-reason">\${escapeHtml(error.message)}</div>
+          </div>
+        \`;
+        showToast('Error', 'Validation failed: ' + error.message, 'error');
       }
     }
   </script>

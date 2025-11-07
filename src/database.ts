@@ -125,6 +125,14 @@ export async function initDatabase(): Promise<Database> {
     ADD COLUMN IF NOT EXISTS exportable BOOLEAN DEFAULT false
   `;
 
+  // Automatically mark pantry and bank resources as exportable
+  await sql`
+    UPDATE resources
+    SET exportable = true
+    WHERE type IN ('pantry', 'bank')
+      AND exportable = false
+  `;
+
   // Create zip searches tracking table
   await sql`
     CREATE TABLE IF NOT EXISTS zip_searches (

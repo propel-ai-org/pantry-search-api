@@ -687,6 +687,123 @@ const server = Bun.serve({
       }
     }
 
+    if (url.pathname === "/bulk-validate-urls" && req.method === "POST") {
+      try {
+        const body = await req.json() as { resource_ids?: number[] };
+        const { resource_ids } = body;
+
+        if (!resource_ids || !Array.isArray(resource_ids)) {
+          return new Response(
+            JSON.stringify({ error: "resource_ids array is required" }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        // Get resources with URLs
+        const resources = await db<FoodResource[]>`
+          SELECT id, name, source_url FROM resources
+          WHERE id = ANY(${resource_ids})
+            AND source_url IS NOT NULL
+            AND source_url != ''
+        `;
+
+        const FOOD_KEYWORDS = [
+          'pantry', 'food bank', 'food pickup', 'food distribution',
+          'food assistance', 'meal', 'feeding', 'nutrition', 'hungry',
+          'donate food', 'free food', 'emergency food', 'food program',
+          'soup kitchen', 'food shelf', 'food drive'
+        ];
+
+        const results = [];
+
+        for (const resource of resources) {
+          try {
+            const response = await fetch(resource.source_url!, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; FoodBankBot/1.0)'
+              },
+              signal: AbortSignal.timeout(10000),
+            });
+
+            if (!response.ok) {
+              results.push({
+                id: resource.id,
+                name: resource.name,
+                url: resource.source_url,
+                valid: false,
+                reason: `HTTP ${response.status}`,
+              });
+              continue;
+            }
+
+            const html = await response.text();
+            const lowerHtml = html.toLowerCase();
+
+            // Check if any food keywords are present
+            const foundKeywords = FOOD_KEYWORDS.filter(keyword =>
+              lowerHtml.includes(keyword.toLowerCase())
+            );
+
+            const valid = foundKeywords.length > 0;
+
+            results.push({
+              id: resource.id,
+              name: resource.name,
+              url: resource.source_url,
+              valid,
+              reason: valid
+                ? `Found keywords: ${foundKeywords.slice(0, 3).join(', ')}${foundKeywords.length > 3 ? '...' : ''}`
+                : 'No food-related keywords found',
+              keywords_found: foundKeywords,
+            });
+
+            // If invalid, mark as unexportable
+            if (!valid) {
+              await db`
+                UPDATE resources
+                SET exportable = false
+                WHERE id = ${resource.id}
+              `;
+            }
+
+          } catch (error) {
+            results.push({
+              id: resource.id,
+              name: resource.name,
+              url: resource.source_url,
+              valid: false,
+              reason: error instanceof Error ? error.message : 'Fetch failed',
+            });
+          }
+        }
+
+        return new Response(JSON.stringify({
+          total: resources.length,
+          results,
+          valid_count: results.filter(r => r.valid).length,
+          invalid_count: results.filter(r => !r.valid).length,
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (error) {
+        console.error("Bulk validate URLs error:", error);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to validate URLs",
+            details: error instanceof Error ? error.message : String(error),
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
     if (url.pathname === "/export" && req.method === "GET") {
       const state = url.searchParams.get("state") || undefined;
       const limit = url.searchParams.get("limit")
