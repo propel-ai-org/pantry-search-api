@@ -702,6 +702,8 @@ const server = Bun.serve({
           );
         }
 
+        console.log(`[Validation] Starting bulk validation for ${resource_ids.length} resources`);
+
         // Get resources with URLs
         const resources = await db<FoodResource[]>`
           SELECT id, name, source_url FROM resources
@@ -710,6 +712,8 @@ const server = Bun.serve({
             AND source_url != ''
         `;
 
+        console.log(`[Validation] Found ${resources.length} resources with URLs`);
+
         const FOOD_KEYWORDS = [
           'pantry', 'food bank', 'food pickup', 'food distribution',
           'food assistance', 'meal', 'feeding', 'nutrition', 'hungry',
@@ -717,80 +721,148 @@ const server = Bun.serve({
           'soup kitchen', 'food shelf', 'food drive'
         ];
 
-        const results = [];
+        // Create a streaming response
+        const stream = new ReadableStream({
+          async start(controller) {
+            const encoder = new TextEncoder();
+            let completed = 0;
+            let validCount = 0;
+            let invalidCount = 0;
+            const allResults: any[] = [];
 
-        for (const resource of resources) {
-          try {
-            const response = await fetch(resource.source_url!, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (compatible; FoodBankBot/1.0)'
-              },
-              signal: AbortSignal.timeout(10000),
-            });
+            // Helper to send updates
+            const sendUpdate = (data: any) => {
+              controller.enqueue(encoder.encode(JSON.stringify(data) + '\n'));
+            };
 
-            if (!response.ok) {
-              results.push({
-                id: resource.id,
-                name: resource.name,
-                url: resource.source_url,
-                valid: false,
-                reason: `HTTP ${response.status}`,
-              });
-              continue;
+            // Process resources in parallel with concurrency limit
+            const CONCURRENCY = 10;
+            const processResource = async (resource: FoodResource) => {
+              try {
+                console.log(`[Validation] Fetching ${resource.name} (${resource.source_url})`);
+
+                const response = await fetch(resource.source_url!, {
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; FoodBankBot/1.0)'
+                  },
+                  signal: AbortSignal.timeout(10000),
+                });
+
+                if (!response.ok) {
+                  const result = {
+                    id: resource.id,
+                    name: resource.name,
+                    url: resource.source_url,
+                    valid: false,
+                    reason: `HTTP ${response.status}`,
+                  };
+                  console.log(`[Validation] ❌ ${resource.name} - HTTP ${response.status}`);
+                  invalidCount++;
+
+                  // Mark as unexportable
+                  await db`
+                    UPDATE resources
+                    SET exportable = false
+                    WHERE id = ${resource.id}
+                  `;
+
+                  allResults.push(result);
+                  completed++;
+                  sendUpdate({ type: 'progress', completed, total: resources.length, result });
+                  return;
+                }
+
+                const html = await response.text();
+                const lowerHtml = html.toLowerCase();
+
+                // Check if any food keywords are present
+                const foundKeywords = FOOD_KEYWORDS.filter(keyword =>
+                  lowerHtml.includes(keyword.toLowerCase())
+                );
+
+                const valid = foundKeywords.length > 0;
+                const result = {
+                  id: resource.id,
+                  name: resource.name,
+                  url: resource.source_url,
+                  valid,
+                  reason: valid
+                    ? `Found keywords: ${foundKeywords.slice(0, 3).join(', ')}${foundKeywords.length > 3 ? '...' : ''}`
+                    : 'No food-related keywords found',
+                  keywords_found: foundKeywords,
+                };
+
+                if (valid) {
+                  console.log(`[Validation] ✅ ${resource.name} - Found: ${foundKeywords.slice(0, 3).join(', ')}`);
+                  validCount++;
+                } else {
+                  console.log(`[Validation] ❌ ${resource.name} - No food keywords found`);
+                  invalidCount++;
+                  // Mark as unexportable
+                  await db`
+                    UPDATE resources
+                    SET exportable = false
+                    WHERE id = ${resource.id}
+                  `;
+                }
+
+                allResults.push(result);
+                completed++;
+                sendUpdate({ type: 'progress', completed, total: resources.length, result });
+
+              } catch (error) {
+                const result = {
+                  id: resource.id,
+                  name: resource.name,
+                  url: resource.source_url,
+                  valid: false,
+                  reason: error instanceof Error ? error.message : 'Fetch failed',
+                };
+                console.log(`[Validation] ❌ ${resource.name} - Error: ${result.reason}`);
+                invalidCount++;
+
+                // Mark as unexportable
+                await db`
+                  UPDATE resources
+                  SET exportable = false
+                  WHERE id = ${resource.id}
+                `;
+
+                allResults.push(result);
+                completed++;
+                sendUpdate({ type: 'progress', completed, total: resources.length, result });
+              }
+            };
+
+            // Process in batches with concurrency limit
+            for (let i = 0; i < resources.length; i += CONCURRENCY) {
+              const batch = resources.slice(i, i + CONCURRENCY);
+              await Promise.all(batch.map(processResource));
             }
 
-            const html = await response.text();
-            const lowerHtml = html.toLowerCase();
-
-            // Check if any food keywords are present
-            const foundKeywords = FOOD_KEYWORDS.filter(keyword =>
-              lowerHtml.includes(keyword.toLowerCase())
-            );
-
-            const valid = foundKeywords.length > 0;
-
-            results.push({
-              id: resource.id,
-              name: resource.name,
-              url: resource.source_url,
-              valid,
-              reason: valid
-                ? `Found keywords: ${foundKeywords.slice(0, 3).join(', ')}${foundKeywords.length > 3 ? '...' : ''}`
-                : 'No food-related keywords found',
-              keywords_found: foundKeywords,
+            // Send final summary
+            console.log(`[Validation] Complete: ${validCount} valid, ${invalidCount} invalid out of ${resources.length} total`);
+            sendUpdate({
+              type: 'complete',
+              total: resources.length,
+              results: allResults,
+              valid_count: validCount,
+              invalid_count: invalidCount,
             });
 
-            // If invalid, mark as unexportable
-            if (!valid) {
-              await db`
-                UPDATE resources
-                SET exportable = false
-                WHERE id = ${resource.id}
-              `;
-            }
-
-          } catch (error) {
-            results.push({
-              id: resource.id,
-              name: resource.name,
-              url: resource.source_url,
-              valid: false,
-              reason: error instanceof Error ? error.message : 'Fetch failed',
-            });
+            controller.close();
           }
-        }
+        });
 
-        return new Response(JSON.stringify({
-          total: resources.length,
-          results,
-          valid_count: results.filter(r => r.valid).length,
-          invalid_count: results.filter(r => !r.valid).length,
-        }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'application/x-ndjson',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          },
         });
       } catch (error) {
-        console.error("Bulk validate URLs error:", error);
+        console.error("[Validation] Error:", error);
         return new Response(
           JSON.stringify({
             error: "Failed to validate URLs",

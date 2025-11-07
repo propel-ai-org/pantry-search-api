@@ -1105,6 +1105,11 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
       progressText.textContent = \`Validating \${selectedIds.length} resource(s)...\`;
       resultsDiv.innerHTML = '';
 
+      let total = selectedIds.length;
+      let completed = 0;
+      let validCount = 0;
+      let invalidCount = 0;
+
       try {
         const response = await fetch('/bulk-validate-urls', {
           method: 'POST',
@@ -1126,27 +1131,55 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
+
+          // Process each complete line (NDJSON format)
+          const lines = buffer.split('\\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+
+            try {
+              const update = JSON.parse(line);
+
+              if (update.type === 'progress') {
+                completed = update.completed;
+                const percentage = Math.round((completed / total) * 100);
+                progressFill.style.width = percentage + '%';
+                progressText.textContent = \`Validating: \${completed}/\${total} (\${percentage}%)\`;
+
+                // Add result to display
+                const resultItem = update.result;
+                const resultHtml = \`
+                  <div class="validation-item \${resultItem.valid ? 'valid' : 'invalid'}">
+                    <div class="validation-item-name">\${escapeHtml(resultItem.name)}</div>
+                    <div class="validation-item-reason">\${escapeHtml(resultItem.reason)}</div>
+                  </div>
+                \`;
+                resultsDiv.insertAdjacentHTML('beforeend', resultHtml);
+
+                // Auto-scroll to bottom
+                resultsDiv.scrollTop = resultsDiv.scrollHeight;
+
+              } else if (update.type === 'complete') {
+                progressFill.style.width = '100%';
+                validCount = update.valid_count;
+                invalidCount = update.invalid_count;
+                progressText.textContent = \`Validation complete: \${validCount} valid, \${invalidCount} invalid\`;
+
+                if (invalidCount > 0) {
+                  showToast('Validation Complete', \`Marked \${invalidCount} resource(s) as unexportable\`, 'info');
+                } else {
+                  showToast('Validation Complete', 'All resources passed validation', 'success');
+                }
+
+                clearSelection();
+              }
+            } catch (e) {
+              console.error('Failed to parse update:', line, e);
+            }
+          }
         }
-
-        const result = JSON.parse(buffer);
-
-        progressFill.style.width = '100%';
-        progressText.textContent = \`Validation complete: \${result.valid_count} valid, \${result.invalid_count} invalid\`;
-
-        resultsDiv.innerHTML = result.results.map(item => \`
-          <div class="validation-item \${item.valid ? 'valid' : 'invalid'}">
-            <div class="validation-item-name">\${escapeHtml(item.name)}</div>
-            <div class="validation-item-reason">\${escapeHtml(item.reason)}</div>
-          </div>
-        \`).join('');
-
-        if (result.invalid_count > 0) {
-          showToast('Validation Complete', \`Marked \${result.invalid_count} resource(s) as unexportable\`, 'info');
-        } else {
-          showToast('Validation Complete', 'All resources passed validation', 'success');
-        }
-
-        clearSelection();
 
       } catch (error) {
         progressText.textContent = 'Validation failed';
