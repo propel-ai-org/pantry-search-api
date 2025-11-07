@@ -581,6 +581,18 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
     <h1>🔍 Analyze Resources - False Positive Detection</h1>
     <p class="subtitle">Identify and manage suspicious food resource listings</p>
 
+    <div style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 8px; border-left: 4px solid #4caf50;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <strong style="color: #2e7d32;">Bulk Validation</strong>
+          <p style="margin: 5px 0 0 0; font-size: 14px; color: #558b2f;">Validate all exportable resources to remove invalid entries</p>
+        </div>
+        <button class="btn btn-success" onclick="validateAllExportable()" style="padding: 12px 24px; font-size: 16px;">
+          Validate All Exportable
+        </button>
+      </div>
+    </div>
+
     <div class="filters">
       <div class="filter-group">
         <label>State</label>
@@ -1190,6 +1202,108 @@ export async function generateAnalyzePage(db: Database): Promise<string> {
           </div>
         \`;
         showToast('Error', 'Validation failed: ' + error.message, 'error');
+      }
+    }
+
+    async function validateAllExportable() {
+      if (!confirm('This will validate ALL exportable resources. Resources that fail validation will be marked as unexportable. This may take several minutes. Continue?')) {
+        return;
+      }
+
+      try {
+        // Fetch all exportable resource IDs
+        showToast('Fetching Resources', 'Loading all exportable resources...', 'info');
+
+        const response = await fetch('/analyze-resources?exportable=true&limit=10000');
+        const data = await response.json();
+
+        if (!data.resources || data.resources.length === 0) {
+          showToast('No Resources', 'No exportable resources found', 'info');
+          return;
+        }
+
+        const resourceIds = data.resources.map(r => r.id);
+        showToast('Starting Validation', \`Found \${resourceIds.length} exportable resources. Starting validation...\`, 'info');
+
+        // Open modal and start validation
+        const modal = document.getElementById('validationModal');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const resultsDiv = document.getElementById('validationResults');
+
+        modal.classList.add('show');
+        progressFill.style.width = '0%';
+        progressText.textContent = \`Validating \${resourceIds.length} exportable resource(s)...\`;
+        resultsDiv.innerHTML = '';
+
+        let total = resourceIds.length;
+        let completed = 0;
+        let validCount = 0;
+        let invalidCount = 0;
+
+        const validationResponse = await fetch('/bulk-validate-urls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resource_ids: resourceIds })
+        });
+
+        if (!validationResponse.ok) {
+          throw new Error('Validation request failed');
+        }
+
+        const reader = validationResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Process each complete line (NDJSON format)
+          const lines = buffer.split('\\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+
+            try {
+              const update = JSON.parse(line);
+
+              if (update.type === 'progress') {
+                completed = update.completed;
+                const percentage = Math.round((completed / total) * 100);
+                progressFill.style.width = percentage + '%';
+                progressText.textContent = \`Validating: \${completed}/\${total} (\${percentage}%)\`;
+
+                const resultItem = update.result;
+                const resultHtml = \`
+                  <div class="validation-item \${resultItem.valid ? 'valid' : 'invalid'}">
+                    <div class="validation-item-name">\${escapeHtml(resultItem.name)}</div>
+                    <div class="validation-item-reason">\${escapeHtml(resultItem.reason)}</div>
+                  </div>
+                \`;
+                resultsDiv.insertAdjacentHTML('beforeend', resultHtml);
+                resultsDiv.scrollTop = resultsDiv.scrollHeight;
+
+              } else if (update.type === 'complete') {
+                progressFill.style.width = '100%';
+                validCount = update.valid_count;
+                invalidCount = update.invalid_count;
+                progressText.textContent = \`Validation complete: \${validCount} valid, \${invalidCount} invalid\`;
+
+                showToast('Validation Complete', \`Marked \${invalidCount} resource(s) as unexportable. \${validCount} resources remain exportable.\`, 'success');
+              }
+            } catch (e) {
+              console.error('Failed to parse update:', line, e);
+            }
+          }
+        }
+
+      } catch (error) {
+        showToast('Error', 'Failed to validate all exportable: ' + error.message, 'error');
       }
     }
   </script>
