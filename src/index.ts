@@ -883,10 +883,12 @@ const server = Bun.serve({
         : undefined;
 
       try {
-        // Get all exportable resources (or filtered by state)
+        // Get all exportable resources with URLs (or filtered by state)
         const resources = await db<FoodResource[]>`
           SELECT * FROM resources
           WHERE exportable = true
+            AND source_url IS NOT NULL
+            AND source_url != ''
           ${state ? db`AND state = ${state.toUpperCase()}` : db``}
           ORDER BY created_at DESC
           ${limit ? db`LIMIT ${limit}` : db``}
