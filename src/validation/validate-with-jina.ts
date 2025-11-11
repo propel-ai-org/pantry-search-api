@@ -582,7 +582,20 @@ async function validateResource(db: Database, resource: FoodResource): Promise<U
     // If this is a directory listing and a valid food resource, try to find a better URL
     if (extractedData.is_directory_listing && extractedData.is_food_resource) {
       console.log(`  - Directory listing detected, searching for dedicated URL...`);
-      betterUrl = await searchForDedicatedUrl(resource);
+
+      // Check cache first to avoid duplicate searches for resources at the same address
+      const cacheKey = `${resource.street_address}|${resource.city}|${resource.state}`.toLowerCase();
+      if (dedicatedUrlCache.has(cacheKey)) {
+        betterUrl = dedicatedUrlCache.get(cacheKey)!;
+        if (betterUrl) {
+          console.log(`  - Using cached URL for this address: ${betterUrl}`);
+        } else {
+          console.log(`  - Cache: No dedicated URL found for this address`);
+        }
+      } else {
+        betterUrl = await searchForDedicatedUrl(resource);
+        dedicatedUrlCache.set(cacheKey, betterUrl);
+      }
 
       if (betterUrl && betterUrl !== resource.source_url) {
         console.log(`  - Found better URL: ${betterUrl}`);
@@ -637,6 +650,9 @@ async function validateResource(db: Database, resource: FoodResource): Promise<U
     };
   }
 }
+
+// Cache for dedicated URLs by address to avoid duplicate searches
+const dedicatedUrlCache = new Map<string, string | null>();
 
 async function main() {
   const args = process.argv.slice(2);
