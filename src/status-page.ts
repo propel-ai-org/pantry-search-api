@@ -229,6 +229,34 @@ export async function generateStatusPage(db: Database): Promise<string> {
       gap: 8px;
     }
 
+    .action-btn {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .action-btn:hover {
+      background: #5568d3;
+    }
+
+    .action-btn.jina {
+      background: #11998e;
+    }
+
+    .action-btn.jina:hover {
+      background: #0d7a72;
+    }
+
+    .action-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     .status-icon {
       font-size: 18px;
     }
@@ -480,12 +508,15 @@ export async function generateStatusPage(db: Database): Promise<string> {
             </div>
             <div class="counties-list" id="counties-${state}">
               ${counties.map(county => `
-                <div class="county-item ${county.searched ? 'searched' : 'pending'}"
-                     onclick="viewCounty('${encodeURIComponent(county.name)}', '${state}')">
-                  <span class="county-name">${county.name}</span>
+                <div class="county-item ${county.searched ? 'searched' : 'pending'}">
+                  <span class="county-name" onclick="viewCounty('${encodeURIComponent(county.name)}', '${state}')">${county.name}</span>
                   <div class="county-status">
                     ${county.searched
-                      ? `<span class="result-count">${county.resultCount || 0} results</span><span class="status-icon">✅</span>`
+                      ? `
+                        <span class="result-count">${county.resultCount || 0} results</span>
+                        <button class="action-btn jina" onclick="event.stopPropagation(); rerunCountyJina('${encodeURIComponent(county.name)}', '${state}', this)" title="Re-run search with Jina">🔄 Jina</button>
+                        <span class="status-icon">✅</span>
+                      `
                       : `<span class="status-icon">⏳</span>`
                     }
                   </div>
@@ -511,6 +542,37 @@ export async function generateStatusPage(db: Database): Promise<string> {
     function closeSidebar() {
       document.getElementById('sidebar').classList.remove('open');
       document.getElementById('overlay').classList.remove('visible');
+    }
+
+    async function rerunCountyJina(countyName, state, buttonEl) {
+      if (!confirm(\`Re-run search for \${decodeURIComponent(countyName)}, \${state} using Jina AI?\\n\\nThis will search for new food resources using Jina's search engine.\`)) {
+        return;
+      }
+
+      const originalText = buttonEl.textContent;
+      buttonEl.disabled = true;
+      buttonEl.textContent = '⏳ Running...';
+
+      try {
+        const response = await fetch(\`/search-county-jina?county=\${countyName}&state=\${state}\`, {
+          method: 'POST',
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          alert(\`Jina search completed!\\n\\nFound: \${data.found} resources\\nInserted: \${data.inserted} new resources\\n\\nRefresh the page to see updated results.\`);
+          // Optionally reload the page
+          window.location.reload();
+        } else {
+          alert(\`Error: \${data.error || 'Unknown error'}\\n\\nDetails: \${data.details || 'None'}\`);
+        }
+      } catch (error) {
+        alert(\`Failed to run Jina search:\\n\${error.message}\`);
+      } finally {
+        buttonEl.disabled = false;
+        buttonEl.textContent = originalText;
+      }
     }
 
     async function viewCounty(countyName, state) {

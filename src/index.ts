@@ -5,6 +5,7 @@ import { initDatabase, type FoodResource } from "./database";
 import { searchFoodResources } from "./search";
 import { searchFoodResourcesByCounty } from "./county-search";
 import { findCounty } from "./counties";
+import { searchWithJina } from "./jina-search";
 import { startEnrichmentWorker } from "./enrichment-worker";
 import {
   getCountyStats,
@@ -118,6 +119,170 @@ const server = Bun.serve({
         return new Response(
           JSON.stringify({
             error: "Failed to search for food resources by county",
+            details: error instanceof Error ? error.message : String(error),
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
+    if (url.pathname === "/search-county-jina" && req.method === "POST") {
+      const countyName = url.searchParams.get("county");
+      const state = url.searchParams.get("state");
+
+      if (!countyName || !state) {
+        return new Response(
+          JSON.stringify({
+            error: "county and state parameters are required",
+          }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      try {
+        const county = await findCounty(countyName, state);
+
+        if (!county) {
+          return new Response(
+            JSON.stringify({
+              error: `County not found: ${countyName}, ${state}`,
+            }),
+            {
+              status: 404,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        console.log(`Performing Jina search for ${county.name}, ${county.state}`);
+
+        // Use Jina to search for resources
+        const query = `${county.name} County, ${county.state}`;
+        const jinaResults = await searchWithJina(query, "county");
+
+        console.log(`Jina search found ${jinaResults.length} resources`);
+
+        // Deduplicate Jina results by address (keep first occurrence)
+        const seenAddressesInResults = new Map<string, typeof jinaResults[0]>();
+        for (const resource of jinaResults) {
+          const normalizedAddress = resource.address?.toLowerCase().trim().replace(/\s+/g, ' ');
+          if (normalizedAddress && !seenAddressesInResults.has(normalizedAddress)) {
+            seenAddressesInResults.set(normalizedAddress, resource);
+          } else if (normalizedAddress) {
+            console.log(`Skipping duplicate from Jina: ${resource.name} at ${resource.address} (already have ${seenAddressesInResults.get(normalizedAddress)?.name})`);
+          }
+        }
+
+        const dedupedJinaResults = Array.from(seenAddressesInResults.values());
+        console.log(`After deduplication: ${dedupedJinaResults.length} unique addresses (${jinaResults.length - dedupedJinaResults.length} duplicates removed)`);
+
+        // Check for existing resources to avoid duplicates
+        const existingResources = await db<Array<{ id: number; address: string }>>`
+          SELECT id, address FROM resources
+        `;
+
+        const existingAddresses = new Set(
+          existingResources.map(r => r.address?.toLowerCase().trim().replace(/\s+/g, ' ')).filter(Boolean)
+        );
+
+        // Store results in database
+        let insertedCount = 0;
+        for (const resource of dedupedJinaResults) {
+          try {
+            const normalizedAddress = resource.address?.toLowerCase().trim().replace(/\s+/g, ' ');
+
+            // Skip if we already have this address
+            if (normalizedAddress && existingAddresses.has(normalizedAddress)) {
+              console.log(`Skipping duplicate: ${resource.name} at ${resource.address}`);
+              continue;
+            }
+
+            await db`
+              INSERT INTO resources (
+                name, address, city, state, zip_code, county_name, county_geoid, location_type,
+                latitude, longitude, type, phone, hours, rating, wait_time_minutes,
+                eligibility_requirements, services_offered, languages_spoken, accessibility_notes,
+                notes, is_verified, verification_notes, source_url, needs_enrichment
+              ) VALUES (
+                ${resource.name || ""},
+                ${resource.address || ""},
+                ${resource.city || null},
+                ${resource.state || county.state},
+                ${resource.zip_code || null},
+                ${county.name},
+                ${county.geoid},
+                'county',
+                ${resource.latitude || null},
+                ${resource.longitude || null},
+                ${resource.type || "mixed"},
+                ${resource.phone || null},
+                ${resource.hours || null},
+                ${resource.rating || null},
+                ${resource.wait_time_minutes || null},
+                ${resource.eligibility_requirements || null},
+                ${resource.services_offered || null},
+                ${resource.languages_spoken || null},
+                ${resource.accessibility_notes || null},
+                ${resource.notes || null},
+                ${resource.is_verified !== undefined ? resource.is_verified : true},
+                ${resource.verification_notes || "Found via Jina search"},
+                ${resource.source_url || null},
+                ${true}
+              )
+            `;
+
+            if (normalizedAddress) {
+              existingAddresses.add(normalizedAddress);
+            }
+            insertedCount++;
+          } catch (error) {
+            console.error(`Error inserting resource ${resource.name}:`, error);
+          }
+        }
+
+        // Update county_searches table
+        // First check if this county has been searched before
+        const existingSearch = await db<Array<{ id: number }>>`
+          SELECT id FROM county_searches
+          WHERE county_geoid = ${county.geoid}
+        `;
+
+        if (existingSearch.length > 0) {
+          // Update existing record
+          await db`
+            UPDATE county_searches
+            SET result_count = ${insertedCount},
+                searched_at = NOW()
+            WHERE county_geoid = ${county.geoid}
+          `;
+        } else {
+          // Insert new record
+          await db`
+            INSERT INTO county_searches (county_geoid, county_name, state, result_count, searched_at)
+            VALUES (${county.geoid}, ${county.name}, ${county.state}, ${insertedCount}, NOW())
+          `;
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          county: `${county.name}, ${county.state}`,
+          found: jinaResults.length,
+          inserted: insertedCount,
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (error) {
+        console.error("Jina county search error:", error);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to search for food resources with Jina",
             details: error instanceof Error ? error.message : String(error),
           }),
           {
@@ -638,6 +803,17 @@ const server = Bun.serve({
                 `;
                 enriched.push(resource.id);
               } else {
+                // Check if permanently closed - mark as unexportable
+                if (enrichmentResult.failureReason === 'Permanently closed') {
+                  await db`
+                    UPDATE resources SET
+                      exportable = false,
+                      last_enrichment_attempt = NOW(),
+                      enrichment_failure_count = ${(resource.enrichment_failure_count || 0) + 1},
+                      enrichment_failure_reason = ${enrichmentResult.failureReason}
+                    WHERE id = ${resource.id}
+                  `;
+                }
                 failed.push({
                   id: resource.id,
                   reason: enrichmentResult.failureReason || "No enrichment data found"

@@ -51,17 +51,31 @@ async function processResource(
       `;
       console.log(`[Enrichment] ✅ ${result.data.name || resource.name}`);
     } else {
-      // Mark as failed with reason
-      const failureCount = (resource.enrichment_failure_count || 0) + 1;
-      await db`
-        UPDATE resources
-        SET
-          last_enrichment_attempt = CURRENT_TIMESTAMP,
-          enrichment_failure_count = ${failureCount},
-          enrichment_failure_reason = ${result.failureReason || "Unknown error"}
-        WHERE id = ${resource.id}
-      `;
-      console.log(`[Enrichment] ❌ ${resource.name} (${result.failureReason})`);
+      // Check if permanently closed - mark as unexportable
+      if (result.failureReason === 'Permanently closed') {
+        await db`
+          UPDATE resources
+          SET
+            exportable = false,
+            last_enrichment_attempt = CURRENT_TIMESTAMP,
+            enrichment_failure_count = ${(resource.enrichment_failure_count || 0) + 1},
+            enrichment_failure_reason = ${result.failureReason}
+          WHERE id = ${resource.id}
+        `;
+        console.log(`[Enrichment] ⛔ ${resource.name} (${result.failureReason} - marked unexportable)`);
+      } else {
+        // Mark as failed with reason
+        const failureCount = (resource.enrichment_failure_count || 0) + 1;
+        await db`
+          UPDATE resources
+          SET
+            last_enrichment_attempt = CURRENT_TIMESTAMP,
+            enrichment_failure_count = ${failureCount},
+            enrichment_failure_reason = ${result.failureReason || "Unknown error"}
+          WHERE id = ${resource.id}
+        `;
+        console.log(`[Enrichment] ❌ ${resource.name} (${result.failureReason})`);
+      }
     }
   } finally {
     activeEnrichments--;
@@ -76,16 +90,26 @@ async function enrichmentLoop(db: Database, enrichFn: EnrichmentFunction) {
         const availableSlots = MAX_CONCURRENT_ENRICHMENTS - activeEnrichments;
 
         // Find resources that need enrichment (but not permanently failed ones)
+        // Exclude resources attempted in the last 5 minutes to prevent race conditions
         const needsEnrichment = await db<FoodResource[]>`
           SELECT * FROM resources
           WHERE needs_enrichment = true
           AND (enrichment_failure_count < 3 OR enrichment_failure_count IS NULL)
           AND (enrichment_failure_reason IS NULL OR enrichment_failure_reason NOT LIKE '%Permanently closed%')
+          AND (last_enrichment_attempt IS NULL OR last_enrichment_attempt < NOW() - INTERVAL '5 minutes')
           ORDER BY created_at DESC
           LIMIT ${availableSlots}
         `;
 
         if (needsEnrichment.length > 0) {
+          // Immediately mark these resources as being enriched to prevent other threads from picking them up
+          const resourceIds = needsEnrichment.map(r => r.id);
+          await db`
+            UPDATE resources
+            SET last_enrichment_attempt = CURRENT_TIMESTAMP
+            WHERE id = ANY(${resourceIds})
+          `;
+
           console.log(`[Enrichment] Starting ${needsEnrichment.length} enrichment requests (${activeEnrichments} already running, max ${MAX_CONCURRENT_ENRICHMENTS})...`);
 
           // Start enrichment for each resource (fire and forget)

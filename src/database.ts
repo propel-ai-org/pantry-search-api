@@ -141,6 +141,39 @@ export async function initDatabase(): Promise<Database> {
     )
   `;
 
+  // Ensure unique constraint exists (for both new and existing databases)
+  try {
+    // Check if constraint already exists
+    const constraintExists = await sql`
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'county_searches_county_geoid_key'
+    `;
+
+    if (constraintExists.length === 0) {
+      console.log("Adding unique constraint to county_searches.county_geoid");
+
+      // First, remove duplicates (keep the most recent one)
+      await sql`
+        DELETE FROM county_searches
+        WHERE id NOT IN (
+          SELECT MAX(id)
+          FROM county_searches
+          GROUP BY county_geoid
+        )
+      `;
+      console.log("Cleaned up duplicate county_searches entries");
+
+      // Now add the unique constraint
+      await sql`
+        ALTER TABLE county_searches
+        ADD CONSTRAINT county_searches_county_geoid_key UNIQUE (county_geoid)
+      `;
+      console.log("Successfully added unique constraint");
+    }
+  } catch (error) {
+    console.log("Note: Could not add constraint:", error);
+  }
+
   // Create indexes
   await sql`CREATE INDEX IF NOT EXISTS idx_zip_code ON resources(zip_code)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_county_geoid ON resources(county_geoid)`;

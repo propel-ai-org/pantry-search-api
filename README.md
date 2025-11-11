@@ -439,7 +439,7 @@ bun src/validate-with-jina.ts 25 TX
 
 1. **Updates fields** when better data is found:
    - Operating hours
-   - Phone numbers
+   - Phone numbers (standardized to `(XXX) XXX-XXXX` format)
    - Services offered
    - Eligibility requirements
 
@@ -447,7 +447,13 @@ bun src/validate-with-jina.ts 25 TX
    - Website fails to load or returns errors
    - Site is not actually a food resource (financial bank, directory page, etc.)
 
-3. **Logs all changes** with before/after values and timestamps in `verification_notes`
+3. **Data quality controls**:
+   - Extracts only ONE primary phone number (discards lists)
+   - Standardizes all phone formats to `(XXX) XXX-XXXX`
+   - Rejects directory pages listing multiple organizations
+   - Validates data before updating
+
+4. **Logs all changes** with before/after values and timestamps in `verification_notes`
 
 **Example output:**
 ```
@@ -471,11 +477,14 @@ No change: 23
 ```
 
 The script intelligently:
+- **Processes 25 resources concurrently** for faster throughput
 - Selects relevant subpages (hours, contact, visit info) using LLM
 - Extracts up to 3 pages per resource for comprehensive data
 - Only updates when new data is clearly better
-- Respects Jina rate limits (adjusts delay based on API key presence)
+- Respects Jina rate limits with batch processing
 - Updates `last_verified_at` timestamp for all validated resources
+
+**Performance:** With a Jina API key, expect ~500-700 resources per hour (vs ~17/hour without parallelization)
 
 ## Utility Scripts
 
