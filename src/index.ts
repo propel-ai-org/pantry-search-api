@@ -19,6 +19,7 @@ import { validateBatch } from "./ai-validator";
 import { enrichWithGooglePlaces } from "./google-places";
 import { generateAnalyzePage } from "./analyze-page";
 import { expandDirectory } from "./directory-expander";
+import { cleanHours } from "./format-hours";
 
 const db = await initDatabase();
 
@@ -1106,7 +1107,7 @@ const server = Bun.serve({
             address: resource.address,
             zip5: resource.zip_code || "",
             phone: resource.phone || "",
-            hours: resource.hours || "",
+            hours: cleanHours(resource.hours),
             places_id: resource.google_place_id || "",
             description: descParts.join(". "),
             url: resource.source_url || "",

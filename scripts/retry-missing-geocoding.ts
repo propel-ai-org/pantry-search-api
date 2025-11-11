@@ -62,19 +62,33 @@ for (let i = 0; i < missingGeocode.length; i++) {
       const nameChange = result.data.name !== resource.name ? ` (name updated to: ${result.data.name})` : '';
       console.log(`  ✅ Success: (${result.data.latitude}, ${result.data.longitude})${nameChange}\n`);
     } else {
-      // Update failure count
-      const failureCount = (resource.enrichment_failure_count || 0) + 1;
-      await db`
-        UPDATE resources
-        SET
-          last_enrichment_attempt = CURRENT_TIMESTAMP,
-          enrichment_failure_count = ${failureCount},
-          enrichment_failure_reason = ${result.failureReason || 'Unknown error'}
-        WHERE id = ${resource.id}
-      `;
-
-      failedCount++;
-      console.log(`  ❌ Failed: ${result.failureReason}\n`);
+      // Check if permanently closed - mark as unexportable
+      if (result.failureReason === 'Permanently closed') {
+        await db`
+          UPDATE resources
+          SET
+            exportable = false,
+            last_enrichment_attempt = CURRENT_TIMESTAMP,
+            enrichment_failure_count = ${(resource.enrichment_failure_count || 0) + 1},
+            enrichment_failure_reason = ${result.failureReason}
+          WHERE id = ${resource.id}
+        `;
+        failedCount++;
+        console.log(`  ❌ Failed: ${result.failureReason} (marked unexportable)\n`);
+      } else {
+        // Update failure count for other failures
+        const failureCount = (resource.enrichment_failure_count || 0) + 1;
+        await db`
+          UPDATE resources
+          SET
+            last_enrichment_attempt = CURRENT_TIMESTAMP,
+            enrichment_failure_count = ${failureCount},
+            enrichment_failure_reason = ${result.failureReason || 'Unknown error'}
+          WHERE id = ${resource.id}
+        `;
+        failedCount++;
+        console.log(`  ❌ Failed: ${result.failureReason}\n`);
+      }
     }
   } catch (error) {
     console.error(`  ❌ Error: ${error instanceof Error ? error.message : String(error)}\n`);

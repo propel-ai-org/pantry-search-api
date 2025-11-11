@@ -4,6 +4,7 @@
 import type { Database } from "bun:sql";
 import type { FoodResource } from "./database";
 import { enrichWithGooglePlaces, type EnrichmentResult } from "./google-places";
+import { validateResourceWithJina, applyJinaValidation } from "./jina-validator";
 
 const MAX_CONCURRENT_ENRICHMENTS = 5;
 let activeEnrichments = 0;
@@ -50,6 +51,24 @@ async function processResource(
         WHERE id = ${resource.id}
       `;
       console.log(`[Enrichment] ✅ ${result.data.name || resource.name}`);
+
+      // Run Jina validation if API key is present
+      if (process.env.JINA_API_KEY) {
+        try {
+          // Fetch the updated resource to get the latest data
+          const updatedResource = await db<FoodResource[]>`
+            SELECT * FROM resources WHERE id = ${resource.id}
+          `;
+
+          if (updatedResource.length > 0) {
+            const jinaResult = await validateResourceWithJina(updatedResource[0]);
+            await applyJinaValidation(db, updatedResource[0], jinaResult);
+          }
+        } catch (jinaError) {
+          console.log(`[Jina] Error during validation: ${jinaError instanceof Error ? jinaError.message : String(jinaError)}`);
+          // Don't fail the whole enrichment if Jina validation fails
+        }
+      }
     } else {
       // Check if permanently closed - mark as unexportable
       if (result.failureReason === 'Permanently closed') {
