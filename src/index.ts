@@ -614,6 +614,7 @@ const server = Bun.serve({
                 // Update resource with enriched data
                 await db`
                   UPDATE resources SET
+                    name = ${enrichedData.name || resource.name},
                     phone = ${enrichedData.phone || resource.phone},
                     hours = ${enrichedData.hours || resource.hours},
                     rating = ${enrichedData.rating || resource.rating},
@@ -901,9 +902,8 @@ const server = Bun.serve({
           if (resource.type === "bank") storeType = "Food Bank";
           else if (resource.type === "mixed") storeType = "Food Pantry";
 
-          // Build description from available fields
+          // Build description from available fields (excluding hours)
           const descParts = [];
-          if (resource.hours) descParts.push(`Hours: ${resource.hours}`);
           if (resource.eligibility_requirements) descParts.push(resource.eligibility_requirements);
           if (resource.services_offered) descParts.push(`Services: ${resource.services_offered}`);
           if (resource.notes) descParts.push(resource.notes);
@@ -930,6 +930,8 @@ const server = Bun.serve({
             address: resource.address,
             zip5: resource.zip_code || "",
             phone: resource.phone || "",
+            hours: resource.hours || "",
+            places_id: resource.google_place_id || "",
             description: descParts.join(". "),
             url: resource.source_url || "",
             url_facebook: resource.url_facebook || "",

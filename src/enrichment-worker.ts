@@ -24,6 +24,7 @@ async function processResource(
       await db`
         UPDATE resources
         SET
+          name = ${result.data.name || resource.name},
           latitude = ${result.data.latitude},
           longitude = ${result.data.longitude},
           address = ${result.data.address},
@@ -48,7 +49,7 @@ async function processResource(
           enrichment_failure_reason = NULL
         WHERE id = ${resource.id}
       `;
-      console.log(`[Enrichment] ✅ ${resource.name}`);
+      console.log(`[Enrichment] ✅ ${result.data.name || resource.name}`);
     } else {
       // Mark as failed with reason
       const failureCount = (resource.enrichment_failure_count || 0) + 1;

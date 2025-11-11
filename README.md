@@ -27,9 +27,12 @@ cp .env.example .env
 ```
 
 Required environment variables:
+- `DATABASE_URL`: PostgreSQL connection string
 - `OPENAI_API_KEY`: OpenAI API key (get from https://platform.openai.com/)
 - `GOOGLE_MAPS_API_KEY`: Google Places API key (get from https://console.cloud.google.com/)
-- `DATABASE_URL`: PostgreSQL connection string
+
+Optional environment variables:
+- `JINA_API_KEY`: Jina AI API key for data validation (get from https://jina.ai/) - improves rate limits for validation script
 
 3. Run the server:
 ```bash
@@ -404,6 +407,76 @@ Processing complete!
 Total counties processed: 3
 ```
 
+## Data Quality Validation
+
+### Validate and Update Resources with Jina
+
+Validates and updates food resource data using Jina AI's web scraping service. This tool **automatically improves database quality** by:
+- Fetching actual website content (main page + relevant subpages)
+- Extracting structured data (hours, phone, services, eligibility)
+- **Updating database records** with better/newer information
+- **Marking as unexportable** if website fails or isn't a food resource
+
+**Usage:**
+```bash
+# Validate and update 50 exportable resources
+bun src/validate-with-jina.ts 50
+
+# Validate 100 resources in California only
+bun src/validate-with-jina.ts 100 CA
+
+# Validate 25 resources in Texas
+bun src/validate-with-jina.ts 25 TX
+```
+
+**Smart selection:** The script automatically prioritizes resources that haven't been Jina-validated yet, then cycles through oldest validations. This means each run processes different resources, allowing you to gradually improve the entire dataset without duplicating work.
+
+**Requirements:**
+- `OPENAI_API_KEY`: Required for data extraction and validation
+- `JINA_API_KEY`: Optional but recommended for higher rate limits (20 req/min without key, higher with key)
+
+**What it does:**
+
+1. **Updates fields** when better data is found:
+   - Operating hours
+   - Phone numbers
+   - Services offered
+   - Eligibility requirements
+
+2. **Marks unexportable** when:
+   - Website fails to load or returns errors
+   - Site is not actually a food resource (financial bank, directory page, etc.)
+
+3. **Logs all changes** with before/after values and timestamps in `verification_notes`
+
+**Example output:**
+```
+Processing 1/50: Community Food Bank
+
+  - Validating: Community Food Bank (ID: 12345)
+  - Fetching via Jina: http://communityfoodbank.org/
+  - Fetched 8500 chars from 3 page(s)
+  - Extracting data with LLM...
+  - Is food resource: true
+  - Confidence: high
+  - Action: updated
+    • Updated hours: "Mon-Fri 9AM-5PM" → "Monday-Friday 10AM-4PM, Saturday 9AM-1PM"
+    • Updated phone: "none" → "(555) 123-4567"
+
+=== Summary ===
+Total processed: 50
+Updated: 23
+Marked unexportable: 4
+No change: 23
+```
+
+The script intelligently:
+- Selects relevant subpages (hours, contact, visit info) using LLM
+- Extracts up to 3 pages per resource for comprehensive data
+- Only updates when new data is clearly better
+- Respects Jina rate limits (adjusts delay based on API key presence)
+- Updates `last_verified_at` timestamp for all validated resources
+
 ## Utility Scripts
 
 ### Reset Database
@@ -444,5 +517,6 @@ The database connection is configured via the `DATABASE_URL` environment variabl
 - [Bun](https://bun.sh) - Fast JavaScript runtime
 - [OpenAI API](https://platform.openai.com/) - Web search for finding and verifying food resources
 - [Google Places API](https://developers.google.com/maps/documentation/places/web-service) - Location verification and enrichment
+- [Jina AI](https://jina.ai/) - Web scraping and content extraction for validation
 - [PostgreSQL](https://www.postgresql.org/) - Production database
 - [postgres.js](https://github.com/porsager/postgres) - PostgreSQL client for Node.js/Bun

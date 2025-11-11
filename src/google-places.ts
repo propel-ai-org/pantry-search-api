@@ -6,6 +6,24 @@ import { extractSocialMediaLinks } from "./social-media-extractor";
 
 const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
+interface GeocodingResult {
+  results: Array<{
+    formatted_address: string;
+    geometry: {
+      location: {
+        lat: number;
+        lng: number;
+      };
+    };
+    address_components: Array<{
+      long_name: string;
+      short_name: string;
+      types: string[];
+    }>;
+  }>;
+  status: string;
+}
+
 interface PlacesSearchResult {
   candidates: Array<{
     place_id: string;
@@ -82,7 +100,7 @@ export async function enrichWithGooglePlaces(
 
     if (searchData.status !== "OK" || searchData.candidates.length === 0) {
       console.log(`  ❌ Not found in Google Places`);
-      return { data: null, failureReason: "Not found in Google Places" };
+      return await geocodeAddress(resource);
     }
 
     const candidate = searchData.candidates[0];
@@ -95,7 +113,7 @@ export async function enrichWithGooglePlaces(
 
     if (candidate.business_status === "CLOSED_TEMPORARILY") {
       console.log(`  ⚠️  Business status: ${candidate.business_status}`);
-      return { data: null, failureReason: "Temporarily closed" };
+      return await geocodeAddress(resource);
     }
 
     // Validate that the name reasonably matches what we searched for
@@ -106,18 +124,18 @@ export async function enrichWithGooglePlaces(
       // If it's a close match, accept it anyway
       if (matchResult.isCloseMatch) {
         console.log(`  ℹ️  Accepting close match (${matchResult.matchRatio.toFixed(2)} similarity)`);
+      } else if (isFoodRelatedPlace(candidate.name, candidate.types)) {
+        // Google found a food-related place at this address - accept it with the new name
+        console.log(`  ℹ️  Accepting food-related place with different name`);
       } else {
-        return { data: null, failureReason: `Name mismatch: found "${candidate.name}"` };
+        return await geocodeAddress(resource);
       }
     }
 
     // Check types to filter out non-food-assistance locations
     if (candidate.types && candidate.types.length > 0) {
-      const blockedTypes = [
-        "school",
-        "primary_school",
-        "secondary_school",
-        "university",
+      // Restaurants, cafes, and supermarkets are always blocked
+      const strictlyBlockedTypes = [
         "restaurant",
         "cafe",
         "meal_takeaway",
@@ -125,18 +143,44 @@ export async function enrichWithGooglePlaces(
         "supermarket",
         "grocery_or_supermarket",
         "convenience_store",
+      ];
+
+      // Churches, schools, and stores can be food pantries - only block if not food-related
+      const conditionallyBlockedTypes = [
+        "school",
+        "primary_school",
+        "secondary_school",
+        "university",
         "store",
       ];
 
-      const hasBlockedType = candidate.types.some((type) =>
-        blockedTypes.includes(type)
+      const hasStrictlyBlockedType = candidate.types.some((type) =>
+        strictlyBlockedTypes.includes(type)
       );
 
-      if (hasBlockedType) {
+      if (hasStrictlyBlockedType) {
         console.log(
           `  ⚠️  Blocked type: ${candidate.name} has types [${candidate.types.join(", ")}]`
         );
-        return { data: null, failureReason: `Blocked type: ${candidate.types.join(", ")}` };
+        return await geocodeAddress(resource);
+      }
+
+      const hasConditionallyBlockedType = candidate.types.some((type) =>
+        conditionallyBlockedTypes.includes(type)
+      );
+
+      if (hasConditionallyBlockedType) {
+        // Check if it's food-related despite being a church/school/store
+        if (isFoodRelatedPlace(candidate.name, candidate.types)) {
+          console.log(
+            `  ℹ️  Accepting ${candidate.types.filter(t => conditionallyBlockedTypes.includes(t)).join('/')} as food resource`
+          );
+        } else {
+          console.log(
+            `  ⚠️  Blocked type: ${candidate.name} has types [${candidate.types.join(", ")}]`
+          );
+          return await geocodeAddress(resource);
+        }
       }
     }
 
@@ -175,9 +219,14 @@ export async function enrichWithGooglePlaces(
       socialMediaLinks = await extractSocialMediaLinks(websiteUrl, resource.name);
     }
 
+    // Use Google's name if it's different but we accepted it
+    const shouldUseGoogleName = !matchResult.isMatch && isFoodRelatedPlace(candidate.name, candidate.types);
+    const finalName = shouldUseGoogleName ? candidate.name : resource.name;
+
     return {
       data: {
         ...resource,
+        name: finalName,
         address: candidate.formatted_address.split(",")[0], // Street address only
         city: city || resource.city,
         state: state || resource.state,
@@ -201,7 +250,7 @@ export async function enrichWithGooglePlaces(
         has_takeout: detailsData.result.takeout,
         editorial_summary: detailsData.result.editorial_summary?.overview,
         is_verified: true,
-        verification_notes: `Found via web search and verified via Google Places API${candidate.user_ratings_total ? ` (${candidate.user_ratings_total} reviews)` : ""}`,
+        verification_notes: `Found via web search and verified via Google Places API${candidate.user_ratings_total ? ` (${candidate.user_ratings_total} reviews)` : ""}${shouldUseGoogleName ? `. Original name: ${resource.name}` : ""}`,
         google_place_id: candidate.place_id,
       }
     };
@@ -245,6 +294,33 @@ interface MatchResult {
   isMatch: boolean;
   isCloseMatch: boolean;
   matchRatio: number;
+}
+
+function isFoodRelatedPlace(name: string, types?: string[]): boolean {
+  const foodKeywords = [
+    'food pantry',
+    'food bank',
+    'food distribution',
+    'food center',
+    'meal site',
+    'soup kitchen',
+    'feeding',
+    'hunger',
+    'pantry',
+    'meals on wheels',
+    'loaves',
+    'fishes',
+    'harvest',
+    'storehouse',
+    'cupboard'
+  ];
+
+  const lowerName = name.toLowerCase();
+  const hasKeyword = foodKeywords.some(keyword => lowerName.includes(keyword));
+
+  const hasFoodType = types?.includes('food');
+
+  return hasKeyword || hasFoodType || false;
 }
 
 function isReasonableMatch(searchedName: string, foundName: string): MatchResult {
@@ -306,4 +382,78 @@ function isReasonableMatch(searchedName: string, foundName: string): MatchResult
     isCloseMatch: matchRatio >= 0.3, // 30% match is "close enough" to consider
     matchRatio
   };
+}
+
+async function geocodeAddress(
+  resource: Partial<FoodResource>
+): Promise<EnrichmentResult> {
+  if (!GOOGLE_PLACES_API_KEY) {
+    return { data: null, failureReason: "API key not configured" };
+  }
+
+  const addressParts: string[] = [];
+  if (resource.address) addressParts.push(resource.address);
+  if (resource.city) addressParts.push(resource.city);
+  if (resource.state) addressParts.push(resource.state);
+  if (resource.zip_code) addressParts.push(resource.zip_code);
+
+  const fullAddress = addressParts.join(", ");
+
+  if (!fullAddress) {
+    return { data: null, failureReason: "No address to geocode" };
+  }
+
+  try {
+    console.log(`  🔄 Falling back to geocoding for: ${fullAddress}`);
+
+    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(fullAddress)}&key=${GOOGLE_PLACES_API_KEY}`;
+
+    const response = await fetch(geocodeUrl);
+    const data = await response.json() as GeocodingResult;
+
+    if (data.status !== "OK" || !data.results || data.results.length === 0) {
+      console.log(`  ❌ Geocoding failed: ${data.status}`);
+      return { data: null, failureReason: `Geocoding failed: ${data.status}` };
+    }
+
+    const result = data.results[0];
+    if (!result) {
+      return { data: null, failureReason: "No geocoding result" };
+    }
+    const location = result.geometry.location;
+
+    // Extract city, state, zip from address components if not already present
+    let city = resource.city;
+    let state = resource.state;
+    let zipCode = resource.zip_code;
+
+    for (const component of result.address_components) {
+      if (!city && component.types.includes("locality")) {
+        city = component.long_name;
+      }
+      if (!state && component.types.includes("administrative_area_level_1")) {
+        state = component.short_name;
+      }
+      if (!zipCode && component.types.includes("postal_code")) {
+        zipCode = component.long_name;
+      }
+    }
+
+    console.log(`  ✅ Geocoded: ${result.formatted_address} (${location.lat}, ${location.lng})`);
+
+    return {
+      data: {
+        ...resource,
+        latitude: location.lat,
+        longitude: location.lng,
+        city: city || resource.city,
+        state: state || resource.state,
+        zip_code: zipCode || resource.zip_code,
+        verification_notes: `Geocoded via Google Geocoding API (fallback)`,
+      }
+    };
+  } catch (error) {
+    console.error(`  ❌ Geocoding error:`, error);
+    return { data: null, failureReason: `Geocoding error: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }
