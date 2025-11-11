@@ -72,7 +72,7 @@ async function searchForDedicatedUrl(
   resource: FoodResource
 ): Promise<string | null> {
   try {
-    const query = `"${resource.name}" ${resource.street_address} ${resource.city} ${resource.state}`;
+    const query = `${resource.name} ${resource.street_address} ${resource.city} ${resource.state}`;
     console.log(`  - Searching for dedicated URL: ${query}`);
 
     const url = new URL("https://s.jina.ai/");
@@ -92,7 +92,9 @@ async function searchForDedicatedUrl(
     const response = await fetch(url.toString(), { headers });
 
     if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unable to read error');
       console.log(`  - Search failed: HTTP ${response.status}`);
+      console.log(`  - Error response: ${errorText.substring(0, 200)}`);
       return null;
     }
 
@@ -105,27 +107,71 @@ async function searchForDedicatedUrl(
 
     console.log(`  - Found ${data.data.length} search results`);
 
-    for (const result of data.data.slice(0, 3)) {
+    // Score and sort results by quality
+    const scoredResults = data.data.slice(0, 10).map(result => {
+      let score = 0;
+      const url = result.url.toLowerCase();
+
+      // Prefer official domains
+      if (url.match(/\.(org|com)\/[^\/]*$/)) score += 10;
+      if (url.includes('.org')) score += 5;
+      if (url.includes('.com') && !url.includes('facebook')) score += 3;
+
+      // Penalize news/press sites
+      if (url.match(/news|press|article|features|wbkr|owensborotimes/)) score -= 10;
+
+      // Penalize year-specific URLs
+      if (url.match(/\/20[0-9]{2}\//)) score -= 15;
+
+      // Penalize Facebook
+      if (url.includes('facebook')) score -= 20;
+
+      return { result, score };
+    });
+
+    scoredResults.sort((a, b) => b.score - a.score);
+
+    for (const { result, score } of scoredResults.slice(0, 5)) {
+      console.log(`  - Checking (score: ${score}): ${result.title.substring(0, 60)}...`);
       const lowerUrl = result.url.toLowerCase();
       const lowerTitle = result.title.toLowerCase();
       const lowerContent = result.content.toLowerCase();
       const resourceNameLower = resource.name.toLowerCase();
 
-      if (
-        lowerUrl.includes('directory') ||
-        lowerUrl.includes('listing') ||
-        lowerUrl.includes('search') ||
-        lowerTitle.includes('directory') ||
-        lowerTitle.includes('listing')
-      ) {
-        console.log(`  - Skipping directory page: ${result.url}`);
+      // Skip pages we don't want
+      const skipPatterns = [
+        'directory', 'listing', 'search',
+        'facebook.com/groups', 'facebook.com/.*/posts/',
+        '/20[0-9]{2}/',
+      ];
+
+      const shouldSkip = skipPatterns.some(pattern => {
+        if (pattern.startsWith('/') && pattern.endsWith('/')) {
+          return new RegExp(pattern.slice(1, -1)).test(lowerUrl);
+        }
+        return lowerUrl.includes(pattern) || lowerTitle.includes(pattern);
+      });
+
+      if (shouldSkip) {
+        console.log(`  - Skipping`);
         continue;
       }
 
-      if (lowerTitle.includes(resourceNameLower) || lowerContent.includes(resourceNameLower)) {
-        console.log(`  - Found potential dedicated page: ${result.url}`);
+      // Extract key identifying words
+      const keyName = resourceNameLower
+        .replace(/\s+(food\s+)?(pantry|bank|ministry|center|mission)$/i, '')
+        .replace(/[']/g, '')
+        .trim();
+
+      const normalizedTitle = lowerTitle.replace(/[']/g, '');
+      const normalizedContent = lowerContent.replace(/[']/g, '');
+
+      if (keyName && (normalizedTitle.includes(keyName) || normalizedContent.includes(keyName))) {
+        console.log(`  - ✓ Found match for "${keyName}": ${result.url}`);
         return result.url;
       }
+
+      console.log(`  - × No match for "${keyName}"`);
     }
 
     console.log(`  - No dedicated URL found`);

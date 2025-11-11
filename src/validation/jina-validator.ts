@@ -70,8 +70,8 @@ async function searchForDedicatedUrl(
   resource: FoodResource
 ): Promise<string | null> {
   try {
-    // Build a specific search query
-    const query = `"${resource.name}" ${resource.street_address} ${resource.city} ${resource.state}`;
+    // Build a specific search query (without quotes to avoid API issues)
+    const query = `${resource.name} ${resource.street_address} ${resource.city} ${resource.state}`;
     console.log(`[Jina] Searching for dedicated URL: ${query}`);
 
     const url = new URL("https://s.jina.ai/");
@@ -91,7 +91,9 @@ async function searchForDedicatedUrl(
     const response = await fetch(url.toString(), { headers });
 
     if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unable to read error');
       console.log(`[Jina] Search failed: HTTP ${response.status}`);
+      console.log(`[Jina] Error response: ${errorText.substring(0, 200)}`);
       return null;
     }
 
@@ -104,30 +106,77 @@ async function searchForDedicatedUrl(
 
     console.log(`[Jina] Found ${data.data.length} search results`);
 
-    // Look through top 3 results for a dedicated page
-    for (const result of data.data.slice(0, 3)) {
+    // Score and sort results by quality
+    const scoredResults = data.data.slice(0, 10).map(result => {
+      let score = 0;
+      const url = result.url.toLowerCase();
+
+      // Prefer official domains
+      if (url.match(/\.(org|com)\/[^\/]*$/)) score += 10; // Root domain
+      if (url.includes('.org')) score += 5;
+      if (url.includes('.com') && !url.includes('facebook')) score += 3;
+
+      // Penalize news/press sites
+      if (url.match(/news|press|article|features|wbkr|owensborotimes/)) score -= 10;
+
+      // Penalize year-specific URLs
+      if (url.match(/\/20[0-9]{2}\//)) score -= 15;
+
+      // Penalize Facebook
+      if (url.includes('facebook')) score -= 20;
+
+      return { result, score };
+    });
+
+    scoredResults.sort((a, b) => b.score - a.score);
+
+    // Look through top scored results
+    for (const { result, score } of scoredResults.slice(0, 5)) {
+      console.log(`[Jina] Checking (score: ${score}): ${result.title} (${result.url})`);
       const lowerUrl = result.url.toLowerCase();
       const lowerTitle = result.title.toLowerCase();
       const lowerContent = result.content.toLowerCase();
       const resourceNameLower = resource.name.toLowerCase();
 
-      // Skip obvious directory/listing pages
-      if (
-        lowerUrl.includes('directory') ||
-        lowerUrl.includes('listing') ||
-        lowerUrl.includes('search') ||
-        lowerTitle.includes('directory') ||
-        lowerTitle.includes('listing')
-      ) {
-        console.log(`[Jina] Skipping directory page: ${result.url}`);
+      // Skip pages we don't want
+      const skipPatterns = [
+        'directory', 'listing', 'search',                    // Directory/listing pages
+        'facebook.com/groups', 'facebook.com/.*/posts/',     // Facebook posts
+        '/20[0-9]{2}/',                                      // URLs with years (old news articles)
+      ];
+
+      const shouldSkip = skipPatterns.some(pattern => {
+        if (pattern.startsWith('/') && pattern.endsWith('/')) {
+          // It's a regex pattern
+          return new RegExp(pattern.slice(1, -1)).test(lowerUrl);
+        }
+        return lowerUrl.includes(pattern) || lowerTitle.includes(pattern);
+      });
+
+      if (shouldSkip) {
+        console.log(`[Jina] Skipping: ${result.url}`);
         continue;
       }
 
       // Check if the resource name appears in the title or content
-      if (lowerTitle.includes(resourceNameLower) || lowerContent.includes(resourceNameLower)) {
-        console.log(`[Jina] Found potential dedicated page: ${result.url}`);
+      // Extract key identifying words (remove common suffixes like "Food Pantry", "Food Bank")
+      const keyName = resourceNameLower
+        .replace(/\s+(food\s+)?(pantry|bank|ministry|center|mission)$/i, '')
+        .replace(/[']/g, '')
+        .trim();
+
+      const normalizedTitle = lowerTitle.replace(/[']/g, '');
+      const normalizedContent = lowerContent.replace(/[']/g, '');
+
+      // Match if key name appears in title or content
+      if (keyName && (normalizedTitle.includes(keyName) || normalizedContent.includes(keyName))) {
+        console.log(`[Jina] ✓ Found match for "${keyName}"`);
+        // Don't return immediately - we might want to verify it's not another directory
+        // Collect potential matches and return the best one
         return result.url;
       }
+
+      console.log(`[Jina]   × No match for "${keyName}"`);
     }
 
     console.log(`[Jina] No dedicated URL found in search results`);
