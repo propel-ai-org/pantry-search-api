@@ -55,6 +55,87 @@ interface UpdateAction {
   reason?: string;
 }
 
+interface JinaSearchResult {
+  title: string;
+  url: string;
+  description: string;
+  content: string;
+}
+
+interface JinaSearchResponse {
+  code: number;
+  status: number;
+  data: JinaSearchResult[];
+}
+
+async function searchForDedicatedUrl(
+  resource: FoodResource
+): Promise<string | null> {
+  try {
+    const query = `"${resource.name}" ${resource.street_address} ${resource.city} ${resource.state}`;
+    console.log(`  - Searching for dedicated URL: ${query}`);
+
+    const url = new URL("https://s.jina.ai/");
+    url.searchParams.set("q", query);
+    url.searchParams.set("gl", "US");
+
+    const headers: Record<string, string> = {
+      "Accept": "application/json",
+      "X-Engine": "direct",
+      "X-Retain-Images": "none",
+    };
+
+    if (process.env.JINA_API_KEY) {
+      headers["Authorization"] = `Bearer ${process.env.JINA_API_KEY}`;
+    }
+
+    const response = await fetch(url.toString(), { headers });
+
+    if (!response.ok) {
+      console.log(`  - Search failed: HTTP ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json() as JinaSearchResponse;
+
+    if (!data.data || !Array.isArray(data.data) || data.data.length === 0) {
+      console.log(`  - No search results found`);
+      return null;
+    }
+
+    console.log(`  - Found ${data.data.length} search results`);
+
+    for (const result of data.data.slice(0, 3)) {
+      const lowerUrl = result.url.toLowerCase();
+      const lowerTitle = result.title.toLowerCase();
+      const lowerContent = result.content.toLowerCase();
+      const resourceNameLower = resource.name.toLowerCase();
+
+      if (
+        lowerUrl.includes('directory') ||
+        lowerUrl.includes('listing') ||
+        lowerUrl.includes('search') ||
+        lowerTitle.includes('directory') ||
+        lowerTitle.includes('listing')
+      ) {
+        console.log(`  - Skipping directory page: ${result.url}`);
+        continue;
+      }
+
+      if (lowerTitle.includes(resourceNameLower) || lowerContent.includes(resourceNameLower)) {
+        console.log(`  - Found potential dedicated page: ${result.url}`);
+        return result.url;
+      }
+    }
+
+    console.log(`  - No dedicated URL found`);
+    return null;
+  } catch (error) {
+    console.log(`  - Search error: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 async function fetchWithJina(url: string): Promise<JinaResponse> {
   try {
     const jinaUrl = `https://r.jina.ai/${encodeURIComponent(url)}`;
@@ -445,13 +526,56 @@ async function validateResource(db: Database, resource: FoodResource): Promise<U
 
     console.log(`  - Fetched ${webResult.text?.length || 0} chars from ${webResult.pages_fetched?.length || 1} page(s)`);
     console.log(`  - Extracting data with LLM...`);
-    const extractedData = await extractDataFromWebsite(webResult.text || '', resource.name);
+    let extractedData = await extractDataFromWebsite(webResult.text || '', resource.name);
+    let betterUrl: string | null = null;
 
     console.log(`  - Is food resource: ${extractedData.is_food_resource}`);
+    console.log(`  - Is directory listing: ${extractedData.is_directory_listing}`);
     console.log(`  - Confidence: ${extractedData.confidence}`);
+
+    // If this is a directory listing and a valid food resource, try to find a better URL
+    if (extractedData.is_directory_listing && extractedData.is_food_resource) {
+      console.log(`  - Directory listing detected, searching for dedicated URL...`);
+      betterUrl = await searchForDedicatedUrl(resource);
+
+      if (betterUrl && betterUrl !== resource.source_url) {
+        console.log(`  - Found better URL: ${betterUrl}`);
+        console.log(`  - Re-fetching with dedicated URL...`);
+
+        const dedicatedResult = await fetchMultiPageContent(betterUrl);
+
+        if (dedicatedResult.success) {
+          console.log(`  - Successfully fetched dedicated page (${dedicatedResult.text?.length || 0} chars)`);
+          const dedicatedData = await extractDataFromWebsite(dedicatedResult.text || '', resource.name);
+
+          console.log(`  - Dedicated page - Is food resource: ${dedicatedData.is_food_resource}`);
+          console.log(`  - Dedicated page - Is directory: ${dedicatedData.is_directory_listing}`);
+
+          if (dedicatedData.is_food_resource && !dedicatedData.is_directory_listing) {
+            console.log(`  - Using dedicated page data`);
+            extractedData = dedicatedData;
+            // Update source_url in the database
+            await db`
+              UPDATE resources
+              SET source_url = ${betterUrl}
+              WHERE id = ${resource.id}
+            `;
+          } else {
+            console.log(`  - Dedicated page not suitable, falling back to directory extraction`);
+            betterUrl = null;
+          }
+        } else {
+          console.log(`  - Failed to fetch dedicated page: ${dedicatedResult.error}`);
+          betterUrl = null;
+        }
+      }
+    }
 
     const updateAction = await updateResourceFromWebsite(db, resource, extractedData);
     console.log(`  - Action: ${updateAction.action}`);
+    if (betterUrl) {
+      console.log(`    • Updated source_url: "${resource.source_url}" → "${betterUrl}"`);
+    }
     if (updateAction.changes) {
       updateAction.changes.forEach(change => console.log(`    • ${change}`));
     }

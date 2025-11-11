@@ -50,6 +50,92 @@ export interface JinaValidationResult {
   error?: string;
   should_mark_unexportable?: boolean;
   unexportable_reason?: string;
+  better_url?: string;
+}
+
+interface JinaSearchResult {
+  title: string;
+  url: string;
+  description: string;
+  content: string;
+}
+
+interface JinaSearchResponse {
+  code: number;
+  status: number;
+  data: JinaSearchResult[];
+}
+
+async function searchForDedicatedUrl(
+  resource: FoodResource
+): Promise<string | null> {
+  try {
+    // Build a specific search query
+    const query = `"${resource.name}" ${resource.street_address} ${resource.city} ${resource.state}`;
+    console.log(`[Jina] Searching for dedicated URL: ${query}`);
+
+    const url = new URL("https://s.jina.ai/");
+    url.searchParams.set("q", query);
+    url.searchParams.set("gl", "US");
+
+    const headers: Record<string, string> = {
+      "Accept": "application/json",
+      "X-Engine": "direct",
+      "X-Retain-Images": "none",
+    };
+
+    if (process.env.JINA_API_KEY) {
+      headers["Authorization"] = `Bearer ${process.env.JINA_API_KEY}`;
+    }
+
+    const response = await fetch(url.toString(), { headers });
+
+    if (!response.ok) {
+      console.log(`[Jina] Search failed: HTTP ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json() as JinaSearchResponse;
+
+    if (!data.data || !Array.isArray(data.data) || data.data.length === 0) {
+      console.log(`[Jina] No search results found`);
+      return null;
+    }
+
+    console.log(`[Jina] Found ${data.data.length} search results`);
+
+    // Look through top 3 results for a dedicated page
+    for (const result of data.data.slice(0, 3)) {
+      const lowerUrl = result.url.toLowerCase();
+      const lowerTitle = result.title.toLowerCase();
+      const lowerContent = result.content.toLowerCase();
+      const resourceNameLower = resource.name.toLowerCase();
+
+      // Skip obvious directory/listing pages
+      if (
+        lowerUrl.includes('directory') ||
+        lowerUrl.includes('listing') ||
+        lowerUrl.includes('search') ||
+        lowerTitle.includes('directory') ||
+        lowerTitle.includes('listing')
+      ) {
+        console.log(`[Jina] Skipping directory page: ${result.url}`);
+        continue;
+      }
+
+      // Check if the resource name appears in the title or content
+      if (lowerTitle.includes(resourceNameLower) || lowerContent.includes(resourceNameLower)) {
+        console.log(`[Jina] Found potential dedicated page: ${result.url}`);
+        return result.url;
+      }
+    }
+
+    console.log(`[Jina] No dedicated URL found in search results`);
+    return null;
+  } catch (error) {
+    console.log(`[Jina] Search error: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 }
 
 async function fetchWithJina(url: string): Promise<JinaResponse> {
@@ -363,6 +449,7 @@ export async function validateResourceWithJina(
     const extractedData = await extractDataFromWebsite(webResult.text || '', resource.name);
 
     console.log(`[Jina] Is food resource: ${extractedData.is_food_resource} (confidence: ${extractedData.confidence})`);
+    console.log(`[Jina] Is directory listing: ${extractedData.is_directory_listing}`);
 
     if (!extractedData.is_food_resource) {
       return {
@@ -371,6 +458,43 @@ export async function validateResourceWithJina(
         should_mark_unexportable: true,
         unexportable_reason: `Not a food resource: ${extractedData.reasoning}`,
       };
+    }
+
+    // If this is a directory listing, try to find a better URL
+    if (extractedData.is_directory_listing) {
+      console.log(`[Jina] Directory listing detected, searching for dedicated URL...`);
+      const betterUrl = await searchForDedicatedUrl(resource);
+
+      if (betterUrl && betterUrl !== resource.source_url) {
+        console.log(`[Jina] Found better URL: ${betterUrl}`);
+        console.log(`[Jina] Re-fetching with dedicated URL...`);
+
+        // Fetch the dedicated page
+        const dedicatedResult = await fetchMultiPageContent(betterUrl);
+
+        if (dedicatedResult.success) {
+          console.log(`[Jina] Successfully fetched dedicated page (${dedicatedResult.text?.length || 0} chars)`);
+
+          // Re-extract data from the dedicated page
+          const dedicatedData = await extractDataFromWebsite(dedicatedResult.text || '', resource.name);
+
+          console.log(`[Jina] Dedicated page - Is food resource: ${dedicatedData.is_food_resource}`);
+          console.log(`[Jina] Dedicated page - Is directory: ${dedicatedData.is_directory_listing}`);
+
+          // If the dedicated page is valid and not also a directory, use it
+          if (dedicatedData.is_food_resource && !dedicatedData.is_directory_listing) {
+            return {
+              success: true,
+              extracted_data: dedicatedData,
+              better_url: betterUrl,
+            };
+          } else {
+            console.log(`[Jina] Dedicated page not suitable, falling back to directory extraction`);
+          }
+        } else {
+          console.log(`[Jina] Failed to fetch dedicated page: ${dedicatedResult.error}`);
+        }
+      }
     }
 
     return {
@@ -411,10 +535,11 @@ export async function applyJinaValidation(
 
   const extracted = validationResult.extracted_data;
 
-  // Update resource with extracted data
+  // Update resource with extracted data and better URL if found
   await db`
     UPDATE resources
     SET
+      source_url = COALESCE(${validationResult.better_url}, source_url),
       hours = COALESCE(${extracted.hours}, hours),
       phone = COALESCE(${extracted.phone}, phone),
       services_offered = COALESCE(${extracted.services}, services_offered),
@@ -424,5 +549,9 @@ export async function applyJinaValidation(
     WHERE id = ${resource.id}
   `;
 
-  console.log(`[Jina] ✅ Updated: ${resource.name}`);
+  if (validationResult.better_url) {
+    console.log(`[Jina] ✅ Updated with dedicated URL: ${resource.name}`);
+  } else {
+    console.log(`[Jina] ✅ Updated: ${resource.name}`);
+  }
 }
