@@ -1,10 +1,10 @@
 // ABOUTME: Search functionality for finding and verifying food resources
 // ABOUTME: Handles web search, result parsing, caching, and verification logic
 
-import type { Database, FoodResource } from "./database";
+import type { Database, FoodResource } from "../core/database";
 import { searchWithOpenAI } from "./openai-search";
-import { filterBySource } from "./source-filter";
-import { enrichWithGooglePlaces } from "./google-places";
+import { filterBySource } from "../utils/source-filter";
+import { enrichWithGooglePlaces } from "../enrichment/google-places";
 
 interface SearchResult {
   pantries: FoodResource[];

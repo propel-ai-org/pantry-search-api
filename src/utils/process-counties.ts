@@ -2,9 +2,9 @@
 // ABOUTME: CLI tool to systematically process all counties for food resource searches
 // ABOUTME: Supports filtering by state, batch sizing, and force re-processing
 
-import { initDatabase } from "./database";
-import { getAllCounties, getCountiesByState, type County } from "./counties";
-import { searchFoodResourcesByCounty } from "./county-search";
+import { initDatabase } from "../core/database";
+import { getAllCounties, getCountiesByState, type County } from "../core/counties";
+import { searchFoodResourcesByCounty } from "../search/county-search";
 
 interface ProcessOptions {
   state?: string;

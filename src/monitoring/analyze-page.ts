@@ -1,7 +1,7 @@
 // ABOUTME: HTML page generator for false positive analysis and management
 // ABOUTME: Creates interactive UI for filtering, analyzing, and taking actions on suspicious resources
 
-import type { Database } from "./database";
+import type { Database } from "../core/database";
 
 export async function generateAnalyzePage(db: Database): Promise<string> {
   // Get unique states for filter dropdown (only valid 2-letter state codes)

@@ -1,8 +1,8 @@
 // ABOUTME: Google Places Text Search API integration for discovering food resources
 // ABOUTME: Uses keyword-based search to find food pantries and banks in geographic areas
 
-import type { FoodResource } from "./database";
-import type { County } from "./counties";
+import type { FoodResource } from "../core/database";
+import type { County } from "../core/counties";
 
 const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 

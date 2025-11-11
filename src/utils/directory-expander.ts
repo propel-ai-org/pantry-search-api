@@ -2,7 +2,7 @@
 // ABOUTME: Fetches directory content and extracts multiple locations using OpenAI
 
 import OpenAI from "openai";
-import type { FoodResource } from "./database";
+import type { FoodResource } from "../core/database";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,

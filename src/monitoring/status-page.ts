@@ -1,8 +1,8 @@
 // ABOUTME: HTML status page generator for county processing visualization
 // ABOUTME: Creates interactive UI showing all counties organized by state with completion status
 
-import type { Database } from "./database";
-import { getAllCounties } from "./counties";
+import type { Database } from "../core/database";
+import { getAllCounties } from "../core/counties";
 
 interface CountyWithStatus {
   name: string;

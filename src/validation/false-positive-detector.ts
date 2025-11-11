@@ -1,7 +1,7 @@
 // ABOUTME: False positive detection for food resource listings
 // ABOUTME: Identifies likely non-food-assistance locations through pattern matching and scoring
 
-import type { FoodResource } from "./database";
+import type { FoodResource } from "../core/database";
 
 export interface SuspicionScore {
   score: number; // 0-100, higher = more suspicious

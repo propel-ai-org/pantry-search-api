@@ -1,12 +1,12 @@
 // ABOUTME: County-based search functionality for food resources
 // ABOUTME: Handles searching by county name/state with caching
 
-import type { Database, FoodResource, CountySearch } from "./database";
+import type { Database, FoodResource, CountySearch } from "../core/database";
 import { searchWithOpenAI } from "./openai-search";
 import { searchGooglePlaces } from "./google-places-search";
-import { filterBySource } from "./source-filter";
-import { enrichWithGooglePlaces } from "./google-places";
-import type { County } from "./counties";
+import { filterBySource } from "../utils/source-filter";
+import { enrichWithGooglePlaces } from "../enrichment/google-places";
+import type { County } from "../core/counties";
 
 interface SearchResult {
   pantries: FoodResource[];

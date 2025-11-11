@@ -1,8 +1,8 @@
 // ABOUTME: Monitoring endpoints for tracking county processing and enrichment status
 // ABOUTME: Provides visibility into which counties have been searched and enrichment queue state
 
-import type { Database } from "./database";
-import { getAllCounties } from "./counties";
+import type { Database } from "../core/database";
+import { getAllCounties } from "../core/counties";
 
 export interface CountyStats {
   total: number;

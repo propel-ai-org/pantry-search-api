@@ -2,9 +2,9 @@
 // ABOUTME: Continuously polls database for resources needing enrichment
 
 import type { Database } from "bun:sql";
-import type { FoodResource } from "./database";
+import type { FoodResource } from "../core/database";
 import { enrichWithGooglePlaces, type EnrichmentResult } from "./google-places";
-import { validateResourceWithJina, applyJinaValidation } from "./jina-validator";
+import { validateResourceWithJina, applyJinaValidation } from "../validation/jina-validator";
 
 const MAX_CONCURRENT_ENRICHMENTS = 5;
 let activeEnrichments = 0;

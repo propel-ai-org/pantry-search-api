@@ -2,7 +2,7 @@
 // ABOUTME: Uses GPT-4 with web search to find and verify food pantries/banks
 
 import OpenAI from "openai";
-import type { FoodResource } from "./database";
+import type { FoodResource } from "../core/database";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,

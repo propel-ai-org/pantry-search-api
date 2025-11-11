@@ -2,7 +2,7 @@
 // ABOUTME: Fetches website content, extracts structured data, and returns enrichment data
 
 import OpenAI from "openai";
-import type { FoodResource, Database } from "./database";
+import type { FoodResource, Database } from "../core/database";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -35,6 +35,7 @@ interface JinaResponse {
 
 export interface ExtractedData {
   is_food_resource: boolean;
+  is_directory_listing: boolean;
   hours: string | null;
   phone: string | null;
   services: string | null;
@@ -199,20 +200,39 @@ async function fetchMultiPageContent(url: string): Promise<JinaResponse & { page
   };
 }
 
-async function extractDataFromWebsite(websiteText: string): Promise<ExtractedData> {
+async function extractDataFromWebsite(
+  websiteText: string,
+  resourceName: string
+): Promise<ExtractedData> {
   const prompt = `You are extracting information from a food pantry/food bank website.
+
+Resource name we're validating: "${resourceName}"
 
 Website text: "${websiteText}"
 
-Extract the following information:
-1. Is this actually a food pantry/food bank website? (Check if it's a financial institution, directory page, or unrelated site)
-2. Operating hours - Extract the EXACT text as stated on the website. Return null if not found.
-3. Phone number - Extract ONLY ONE primary/main phone number for this location. If multiple numbers are listed, choose the main contact number. Format cleanly (e.g., "(555) 123-4567" or "555-123-4567"). Return null if not found.
-4. Services offered - Extract ONLY what is explicitly stated. Return null if not found. DO NOT infer, summarize, or add commentary.
-5. Eligibility requirements - Extract ONLY what is explicitly stated. Return null if not found. DO NOT infer, summarize, or add commentary.
+Extract the following information FOR THE SPECIFIC RESOURCE NAMED ABOVE:
+1. Is this a directory/listing page with multiple food resources listed?
+   - Return is_directory_listing=true if this page lists multiple organizations with addresses/hours
+   - Return is_directory_listing=false if this is a dedicated page about one organization
 
-CRITICAL RULES:
-- If this appears to be a directory page listing multiple organizations, return is_food_resource=false
+2. Is this a page about the specific resource "${resourceName}"?
+   - If this is a directory listing and "${resourceName}" is NOT found, return is_food_resource=false
+   - If this is a directory listing and "${resourceName}" IS found, return is_food_resource=true
+   - If this is a dedicated page about "${resourceName}", return is_food_resource=true
+   - If this is unrelated (financial institution, blog post, etc.), return is_food_resource=false
+
+3. Operating hours - Extract ONLY the hours for "${resourceName}". If this is a directory listing, extract ONLY the hours listed next to or associated with "${resourceName}". Return null if not found.
+
+4. Phone number - Extract ONLY the phone number for "${resourceName}". If multiple numbers are listed, choose the main contact number for this specific resource. Format cleanly (e.g., "(555) 123-4567" or "555-123-4567"). Return null if not found.
+
+5. Services offered - Extract ONLY what is explicitly stated about "${resourceName}". Return null if not found. DO NOT infer, summarize, or add commentary.
+
+6. Eligibility requirements - Extract ONLY what is explicitly stated about "${resourceName}". Return null if not found. DO NOT infer, summarize, or add commentary.
+
+CRITICAL RULES FOR DIRECTORY LISTINGS:
+- If this is a directory listing multiple organizations, extract ONLY the information for "${resourceName}"
+- DO NOT combine or aggregate hours from other organizations in the listing
+- If "${resourceName}" is not found in the directory, return is_food_resource=false
 - NEVER add phrases like "not explicitly stated", "appears to", "seems to", etc.
 - NEVER infer information that isn't directly stated
 - If information is not clearly present, return null
@@ -235,6 +255,10 @@ CRITICAL RULES:
               is_food_resource: {
                 type: 'boolean',
                 description: 'True if this is actually a food pantry/bank website',
+              },
+              is_directory_listing: {
+                type: 'boolean',
+                description: 'True if this page lists multiple food resources',
               },
               hours: {
                 type: ['string', 'null'],
@@ -262,7 +286,7 @@ CRITICAL RULES:
                 description: 'Brief explanation of findings',
               },
             },
-            required: ['is_food_resource', 'hours', 'phone', 'services', 'eligibility', 'confidence', 'reasoning'],
+            required: ['is_food_resource', 'is_directory_listing', 'hours', 'phone', 'services', 'eligibility', 'confidence', 'reasoning'],
             additionalProperties: false,
           },
         },
@@ -295,6 +319,7 @@ CRITICAL RULES:
     console.log(`    ERROR in LLM call: ${error instanceof Error ? error.message : String(error)}`);
     return {
       is_food_resource: true,
+      is_directory_listing: false,
       hours: null,
       phone: null,
       services: null,
@@ -335,7 +360,7 @@ export async function validateResourceWithJina(
 
     console.log(`[Jina] Fetched ${webResult.text?.length || 0} chars from ${webResult.pages_fetched?.length || 1} page(s)`);
 
-    const extractedData = await extractDataFromWebsite(webResult.text || '');
+    const extractedData = await extractDataFromWebsite(webResult.text || '', resource.name);
 
     console.log(`[Jina] Is food resource: ${extractedData.is_food_resource} (confidence: ${extractedData.confidence})`);
 

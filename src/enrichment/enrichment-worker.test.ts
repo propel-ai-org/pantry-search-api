@@ -4,7 +4,7 @@
 import { test, expect } from "bun:test";
 import { startEnrichmentWorker } from "./enrichment-worker";
 import type { Database } from "bun:sql";
-import type { FoodResource } from "./database";
+import type { FoodResource } from "../core/database";
 import type { EnrichmentResult } from "./google-places";
 
 test("should process up to 5 requests concurrently", async () => {

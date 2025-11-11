@@ -1,8 +1,8 @@
 // ABOUTME: Google Places API integration for location data enrichment
 // ABOUTME: Verifies addresses, gets coordinates, and checks operational status
 
-import type { FoodResource } from "./database";
-import { extractSocialMediaLinks } from "./social-media-extractor";
+import type { FoodResource } from "../core/database";
+import { extractSocialMediaLinks } from "../utils/social-media-extractor";
 
 const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 

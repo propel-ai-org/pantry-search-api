@@ -2,7 +2,7 @@
 // ABOUTME: Uses cheap model to validate suspicious resources quickly
 
 import OpenAI from "openai";
-import type { FoodResource } from "./database";
+import type { FoodResource } from "../core/database";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,

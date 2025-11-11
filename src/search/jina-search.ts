@@ -2,7 +2,7 @@
 // ABOUTME: Uses Jina's search API to find food pantries/banks and extract structured data
 
 import OpenAI from "openai";
-import type { FoodResource } from "./database";
+import type { FoodResource } from "../core/database";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,

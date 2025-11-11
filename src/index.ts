@@ -1,25 +1,25 @@
 // ABOUTME: Main API server for food pantry/bank search
 // ABOUTME: Provides endpoints to search and runs background enrichment
 
-import { initDatabase, type FoodResource } from "./database";
-import { searchFoodResources } from "./search";
-import { searchFoodResourcesByCounty } from "./county-search";
-import { findCounty } from "./counties";
-import { searchWithJina } from "./jina-search";
-import { startEnrichmentWorker } from "./enrichment-worker";
+import { initDatabase, type FoodResource } from "./core/database";
+import { searchFoodResources } from "./search/search";
+import { searchFoodResourcesByCounty } from "./search/county-search";
+import { findCounty } from "./core/counties";
+import { searchWithJina } from "./search/jina-search";
+import { startEnrichmentWorker } from "./enrichment/enrichment-worker";
 import {
   getCountyStats,
   getEnrichmentStats,
   getUnprocessedCounties,
   getStateCountyStats,
-} from "./monitoring";
-import { generateStatusPage } from "./status-page";
-import { analyzeResources, filterBySuspicion, groupByCategory } from "./false-positive-detector";
-import { validateBatch } from "./ai-validator";
-import { enrichWithGooglePlaces } from "./google-places";
-import { generateAnalyzePage } from "./analyze-page";
-import { expandDirectory } from "./directory-expander";
-import { cleanHours } from "./format-hours";
+} from "./monitoring/monitoring";
+import { generateStatusPage } from "./monitoring/status-page";
+import { analyzeResources, filterBySuspicion, groupByCategory } from "./validation/false-positive-detector";
+import { validateBatch } from "./validation/ai-validator";
+import { enrichWithGooglePlaces } from "./enrichment/google-places";
+import { generateAnalyzePage } from "./monitoring/analyze-page";
+import { expandDirectory } from "./utils/directory-expander";
+import { cleanHours } from "./utils/format-hours";
 
 const db = await initDatabase();
 

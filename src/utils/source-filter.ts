@@ -1,7 +1,7 @@
 // ABOUTME: Source URL filtering to exclude unreliable or inappropriate domains
 // ABOUTME: Maintains list of blocked domains and filters search results
 
-import type { FoodResource } from "./database";
+import type { FoodResource } from "../core/database";
 
 // Domains to exclude from search results
 const BLOCKED_DOMAINS = [

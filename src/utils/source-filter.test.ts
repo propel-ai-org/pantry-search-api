@@ -2,8 +2,8 @@
 // ABOUTME: Validates blocked patterns and ensures food distribution sites aren't filtered
 
 import { test, expect, describe } from "bun:test";
-import { filterBySource } from "./source-filter";
-import type { FoodResource } from "./database";
+import { filterBySource } from "../utils/source-filter";
+import type { FoodResource } from "../core/database";
 
 describe("filterBySource", () => {
   describe("government offices", () => {
