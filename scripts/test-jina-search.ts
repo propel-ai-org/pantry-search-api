@@ -1,7 +1,7 @@
 // ABOUTME: Test script for Jina search functionality
 // ABOUTME: Verifies that Jina API integration works and extracts food resources correctly
 
-import { searchWithJina } from "../src/jina-search";
+import { searchWithJina } from "../src/search/jina-search";
 
 async function main() {
   const args = process.argv.slice(2);

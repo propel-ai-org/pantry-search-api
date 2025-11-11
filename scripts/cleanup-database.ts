@@ -1,8 +1,8 @@
 // ABOUTME: Database cleanup script to remove false positive entries
 // ABOUTME: Applies name-based filtering to existing database records
 
-import { initDatabase } from "../src/database";
-import type { FoodResource } from "../src/database";
+import { initDatabase } from "../src/core/database";
+import type { FoodResource } from "../src/core/database";
 
 // Name patterns that indicate non-food-assistance locations
 const BLOCKED_NAME_PATTERNS = [

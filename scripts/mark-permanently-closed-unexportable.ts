@@ -1,7 +1,7 @@
 // ABOUTME: Mark permanently closed resources as unexportable
 // ABOUTME: Cleanup script for existing resources marked as permanently closed
 
-import { initDatabase } from '../src/database.ts';
+import { initDatabase } from '../src/core/database.ts';
 
 const db = await initDatabase();
 

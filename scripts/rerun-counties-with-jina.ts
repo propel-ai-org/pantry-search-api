@@ -1,8 +1,8 @@
 // ABOUTME: Re-runs existing counties with Jina search to find additional resources
 // ABOUTME: Processes counties in parallel with configurable concurrency
 
-import { initDatabase } from "../src/database";
-import { searchWithJina } from "../src/jina-search";
+import { initDatabase } from "../src/core/database";
+import { searchWithJina } from "../src/search/jina-search";
 
 const CONCURRENCY = 3; // Number of counties to process in parallel
 

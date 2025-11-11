@@ -1,9 +1,9 @@
 // ABOUTME: Retry geocoding for all exportable resources missing lat/long
 // ABOUTME: Uses new geocoding fallback to heal previously failed resources
 
-import { initDatabase } from '../src/database.ts';
-import { enrichWithGooglePlaces } from '../src/google-places.ts';
-import type { FoodResource } from '../src/database.ts';
+import { initDatabase } from '../src/core/database.ts';
+import { enrichWithGooglePlaces } from '../src/enrichment/google-places.ts';
+import type { FoodResource } from '../src/core/database.ts';
 
 const db = await initDatabase();
 

@@ -1,9 +1,9 @@
 // ABOUTME: Enrichment script for resources missing lat/long data
 // ABOUTME: Runs Google Places API enrichment on resources that need it
 
-import { initDatabase } from "../src/database";
-import type { FoodResource } from "../src/database";
-import { enrichWithGooglePlaces } from "../src/google-places";
+import { initDatabase } from "../src/core/database";
+import type { FoodResource } from "../src/core/database";
+import { enrichWithGooglePlaces } from "../src/enrichment/google-places";
 
 async function enrichMissingData() {
   console.log("Starting enrichment of resources with missing data...\n");

@@ -1,9 +1,9 @@
 // ABOUTME: Test script for geocoding fallback functionality
 // ABOUTME: Verifies that failed enrichments can now succeed with geocoding
 
-import { initDatabase } from '../src/database.ts';
-import { enrichWithGooglePlaces } from '../src/google-places.ts';
-import type { FoodResource } from '../src/database.ts';
+import { initDatabase } from '../src/core/database.ts';
+import { enrichWithGooglePlaces } from '../src/enrichment/google-places.ts';
+import type { FoodResource } from '../src/core/database.ts';
 
 const db = await initDatabase();
 

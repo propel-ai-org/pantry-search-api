@@ -1,8 +1,8 @@
 // Debug why Jenkintown is being filtered out
 
-import { searchGooglePlaces } from "../src/google-places-search";
-import { filterBySource } from "../src/source-filter";
-import { findCounty } from "../src/counties";
+import { searchGooglePlaces } from "../src/search/google-places-search";
+import { filterBySource } from "../src/utils/source-filter";
+import { findCounty } from "../src/core/counties";
 
 const county = await findCounty("Montgomery County", "PA");
 

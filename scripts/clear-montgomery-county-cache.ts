@@ -1,6 +1,6 @@
 // Clear cache for Montgomery County, PA to allow fresh testing
 
-import { initDatabase } from "../src/database";
+import { initDatabase } from "../src/core/database";
 
 const db = await initDatabase();
 

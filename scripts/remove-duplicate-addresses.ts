@@ -1,7 +1,7 @@
 // ABOUTME: Removes duplicate resources that share the same address
 // ABOUTME: Keeps the entry with the most descriptive name (longest name)
 
-import { initDatabase } from "../src/database";
+import { initDatabase } from "../src/core/database";
 
 async function removeDuplicateAddresses() {
   const db = await initDatabase();

@@ -1,8 +1,8 @@
 // One-off script to validate Google Places Text Search for Montgomery County, PA
 // Should find Jenkintown Food Cupboard among other results
 
-import { findCounty } from "../src/counties";
-import { searchGooglePlaces } from "../src/google-places-search";
+import { findCounty } from "../src/core/counties";
+import { searchGooglePlaces } from "../src/search/google-places-search";
 
 const county = await findCounty("Montgomery County", "PA");
 

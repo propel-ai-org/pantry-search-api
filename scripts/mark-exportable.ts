@@ -1,7 +1,7 @@
 // ABOUTME: Script to mark pantry and bank type resources as exportable
 // ABOUTME: Sets exportable=true for all resources with type 'pantry' or 'bank'
 
-import { initDatabase } from "../src/database";
+import { initDatabase } from "../src/core/database";
 
 async function markExportable() {
   console.log("Connecting to database...");

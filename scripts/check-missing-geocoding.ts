@@ -1,7 +1,7 @@
 // ABOUTME: Check status of exportable resources missing lat/long
 // ABOUTME: Analyzes why geocoding failed and provides examples
 
-import { initDatabase } from '../src/database.ts';
+import { initDatabase } from '../src/core/database.ts';
 
 const db = await initDatabase();
 

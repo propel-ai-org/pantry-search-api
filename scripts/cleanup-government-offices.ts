@@ -1,7 +1,7 @@
 // ABOUTME: Removes government offices that aren't food distribution sites
 // ABOUTME: Filters out procurement, public works, administration, etc.
 
-import { initDatabase } from "../src/database";
+import { initDatabase } from "../src/core/database";
 
 async function cleanupGovernmentOffices() {
   const db = await initDatabase();

@@ -1,6 +1,6 @@
 // Get full details of 328 Summit Ave entry
 
-import { initDatabase } from "../src/database";
+import { initDatabase } from "../src/core/database";
 
 const db = await initDatabase();
 

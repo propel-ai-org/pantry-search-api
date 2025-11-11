@@ -1,7 +1,7 @@
 // ABOUTME: Quick script to check database table counts
 // ABOUTME: Shows how many records are in each table
 
-import { initDatabase } from "../src/database";
+import { initDatabase } from "../src/core/database";
 
 const db = await initDatabase();
 

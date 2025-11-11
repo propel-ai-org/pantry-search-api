@@ -1,7 +1,7 @@
 // ABOUTME: Cleanup script to remove law enforcement facilities from resources
 // ABOUTME: Removes sheriff offices, police departments, and other law enforcement entries
 
-import { initDatabase } from "../src/database";
+import { initDatabase } from "../src/core/database";
 
 const LAW_ENFORCEMENT_PATTERNS = [
   /\bsheriff'?s?\s+(office|department|dept)\b/i,

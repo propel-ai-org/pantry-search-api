@@ -1,8 +1,8 @@
 // Test the full county search integration with Google Places + OpenAI
 
-import { initDatabase } from "../src/database";
-import { searchFoodResourcesByCounty } from "../src/county-search";
-import { findCounty } from "../src/counties";
+import { initDatabase } from "../src/core/database";
+import { searchFoodResourcesByCounty } from "../src/search/county-search";
+import { findCounty } from "../src/core/counties";
 
 const db = await initDatabase();
 

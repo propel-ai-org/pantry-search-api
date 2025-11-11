@@ -1,7 +1,7 @@
 // ABOUTME: Resets social media columns to NULL for all resources
 // ABOUTME: Allows re-running backfill with improved extraction logic
 
-import { initDatabase } from "../src/database";
+import { initDatabase } from "../src/core/database";
 
 async function resetSocialMedia() {
   const db = await initDatabase();

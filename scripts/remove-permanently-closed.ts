@@ -1,8 +1,8 @@
 // ABOUTME: Removes all resources marked as permanently closed during enrichment
 // ABOUTME: These are places that no longer exist and should not be in the dataset
 
-import { initDatabase } from "../src/database";
-import type { FoodResource } from "../src/database";
+import { initDatabase } from "../src/core/database";
+import type { FoodResource } from "../src/core/database";
 
 async function removePermanentlyClosed() {
   console.log("Starting removal of permanently closed resources...\n");

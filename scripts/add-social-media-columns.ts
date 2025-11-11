@@ -1,7 +1,7 @@
 // ABOUTME: Adds social media URL columns to the resources table
 // ABOUTME: One-time migration script to add Facebook, Twitter, Instagram, YouTube fields
 
-import { initDatabase } from "../src/database";
+import { initDatabase } from "../src/core/database";
 
 async function addSocialMediaColumns() {
   const db = await initDatabase();

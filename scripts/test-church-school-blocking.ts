@@ -1,9 +1,9 @@
 // ABOUTME: Test script for church/school blocking with food indicators
 // ABOUTME: Verifies that churches/schools with food pantries are accepted
 
-import { initDatabase } from '../src/database.ts';
-import { enrichWithGooglePlaces } from '../src/google-places.ts';
-import type { FoodResource } from '../src/database.ts';
+import { initDatabase } from '../src/core/database.ts';
+import { enrichWithGooglePlaces } from '../src/enrichment/google-places.ts';
+import type { FoodResource } from '../src/core/database.ts';
 
 const db = await initDatabase();
 

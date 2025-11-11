@@ -1,6 +1,6 @@
 // Check if Jenkintown Food Cupboard is in the database
 
-import { initDatabase } from "../src/database";
+import { initDatabase } from "../src/core/database";
 
 const db = await initDatabase();
 

@@ -1,9 +1,9 @@
 // ABOUTME: Backfills social media links for existing resources
 // ABOUTME: Fetches websites and extracts social media URLs for resources that have websites but no social links
 
-import { initDatabase } from "../src/database";
-import { extractSocialMediaLinks } from "../src/social-media-extractor";
-import type { FoodResource } from "../src/database";
+import { initDatabase } from "../src/core/database";
+import { extractSocialMediaLinks } from "../src/utils/social-media-extractor";
+import type { FoodResource } from "../src/core/database";
 
 async function backfillSocialMedia() {
   const db = await initDatabase();

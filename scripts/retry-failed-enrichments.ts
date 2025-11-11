@@ -1,7 +1,7 @@
 // ABOUTME: Retry enrichment for resources that failed due to API key issues
 // ABOUTME: Resets enrichment status to allow the background worker to retry
 
-import { initDatabase } from "../src/database";
+import { initDatabase } from "../src/core/database";
 
 async function retryFailedEnrichments() {
   const db = await initDatabase();

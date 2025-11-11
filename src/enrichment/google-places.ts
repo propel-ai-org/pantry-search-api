@@ -8,6 +8,7 @@ const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
 interface GeocodingResult {
   results: Array<{
+    place_id: string;
     formatted_address: string;
     geometry: {
       location: {
@@ -449,6 +450,7 @@ async function geocodeAddress(
         city: city || resource.city,
         state: state || resource.state,
         zip_code: zipCode || resource.zip_code,
+        google_place_id: result.place_id,
         verification_notes: `Geocoded via Google Geocoding API (fallback)`,
       }
     };

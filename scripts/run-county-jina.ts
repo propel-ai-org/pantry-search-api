@@ -1,9 +1,9 @@
 // ABOUTME: Run Jina search on a specific county
 // ABOUTME: Usage: bun scripts/run-county-jina.ts "County Name" "State"
 
-import { initDatabase } from "../src/database";
-import { searchWithJina } from "../src/jina-search";
-import { findCounty } from "../src/counties";
+import { initDatabase } from "../src/core/database";
+import { searchWithJina } from "../src/search/jina-search";
+import { findCounty } from "../src/core/counties";
 
 async function runCountyJina(countyName: string, state: string) {
   const db = await initDatabase();
